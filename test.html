@@ -1,0 +1,863 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Valid Vault - Test</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: #0a0a0a; color: #e0e0e0; padding: 20px; }
+    .container { max-width: 500px; margin: 0 auto; }
+    h1 { color: #00d4aa; margin-bottom: 20px; text-align: center; }
+    h2 { color: #888; font-size: 14px; margin: 20px 0 10px; text-transform: uppercase; }
+    .section { background: #1a1a1a; border-radius: 8px; padding: 16px; margin-bottom: 12px; }
+    button { background: #00d4aa; color: #000; border: none; padding: 12px 20px; border-radius: 6px; cursor: pointer; font-size: 14px; margin: 4px; }
+    button:hover { background: #00b894; }
+    button.secondary { background: #333; color: #e0e0e0; }
+    button.danger { background: #e74c3c; color: #fff; }
+    button.small { padding: 8px 12px; font-size: 12px; }
+    input { background: #2a2a2a; border: 1px solid #444; color: #e0e0e0; padding: 10px; border-radius: 6px; width: 100%; margin: 4px 0; }
+    .log { background: #111; border-radius: 6px; padding: 12px; margin-top: 20px; font-family: monospace; font-size: 12px; max-height: 200px; overflow-y: auto; }
+    .log-entry { padding: 4px 0; border-bottom: 1px solid #222; }
+    .log-entry.success { color: #00d4aa; }
+    .log-entry.error { color: #e74c3c; }
+    .status { display: inline-block; padding: 4px 8px; border-radius: 4px; font-size: 12px; margin: 2px; }
+    .status.active { background: #00d4aa; color: #000; }
+    .status.inactive { background: #333; color: #888; }
+    .hidden { display: none; }
+    .row { display: flex; gap: 8px; align-items: center; margin: 8px 0; }
+    .row input { flex: 1; margin: 0; }
+    .eyeball { background: none; border: none; color: #888; cursor: pointer; padding: 8px; font-size: 16px; }
+    .eyeball:hover { color: #00d4aa; }
+    .eyeball svg { width: 20px; height: 20px; fill: currentColor; }
+    .credential-row { display: flex; justify-content: space-between; align-items: center; padding: 8px 0; border-bottom: 1px solid #333; }
+    .credential-row:last-child { border-bottom: none; }
+    .credential-info { flex: 1; }
+    .credential-login { color: #00d4aa; font-weight: 500; }
+    .credential-pass { color: #666; font-family: monospace; }
+    .modal { position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0,0,0,0.8); display: flex; align-items: center; justify-content: center; z-index: 100; }
+    .modal-content { background: #1a1a1a; border-radius: 12px; padding: 24px; max-width: 420px; width: 90%; max-height: 90vh; overflow-y: auto; }
+    .modal h3 { color: #00d4aa; margin-bottom: 16px; }
+    .timer { color: #e74c3c; font-size: 12px; margin-top: 8px; }
+    .lockout-msg { color: #e74c3c; font-size: 12px; margin-top: 8px; padding: 8px; background: #2a1a1a; border-radius: 4px; }
+    .pin-display { font-size: 48px; font-weight: bold; letter-spacing: 12px; text-align: center; color: #00d4aa; padding: 20px; background: #111; border-radius: 8px; margin: 16px 0; font-family: monospace; }
+    .qr-container { background: #fff; padding: 16px; margin: 16px auto; display: inline-block; border-radius: 8px; }
+    .qr-container svg { display: block; }
+    .qr-wrapper { text-align: center; }
+    .sync-step { color: #888; font-size: 14px; margin-bottom: 12px; }
+    .sync-step.active { color: #00d4aa; }
+    textarea { background: #2a2a2a; border: 1px solid #444; color: #e0e0e0; padding: 10px; border-radius: 6px; width: 100%; margin: 4px 0; font-family: monospace; font-size: 11px; resize: vertical; }
+    .vault-info { background: #111; border-radius: 6px; padding: 12px; margin: 12px 0; font-size: 13px; }
+    .vault-info-row { display: flex; justify-content: space-between; padding: 4px 0; }
+    .vault-info-label { color: #888; }
+    .vault-info-value { color: #00d4aa; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h1>Valid Vault</h1>
+
+    <div class="section">
+      <div id="status">
+        <span class="status inactive" id="status-fingerprint">Fingerprint</span>
+        <span class="status inactive" id="status-pin">PIN</span>
+        <span class="status inactive" id="status-password">Password</span>
+        <span class="status inactive" id="status-session">Session</span>
+      </div>
+    </div>
+
+    <h2>Auth</h2>
+    <div class="section">
+      <button onclick="authFingerprint()">Auth with Fingerprint</button>
+      <button onclick="showEnrollFingerprint()" class="secondary small">Enroll New</button>
+      <div class="row">
+        <input type="text" id="pin-input" placeholder="PIN (4-6 digits)" maxlength="6">
+        <button onclick="authPIN()">Auth</button>
+        <button onclick="showSetPIN()" class="secondary small">Set</button>
+      </div>
+      <div class="row">
+        <input type="password" id="password-input" placeholder="Password (8+ chars)">
+        <button onclick="authPassword()">Auth</button>
+        <button onclick="showSetPassword()" class="secondary small">Set</button>
+      </div>
+      <div id="lockout-display"></div>
+    </div>
+
+    <h2>Password Manager</h2>
+    <div class="section">
+      <div class="row">
+        <input type="text" id="domain-input" placeholder="website.com">
+        <button onclick="showSaveCredential()">Add</button>
+        <button onclick="loadCredentials()" class="secondary">Load</button>
+      </div>
+      <div id="credentials-list"></div>
+    </div>
+
+    <h2>Secure Sync</h2>
+    <div class="section">
+      <button onclick="startSecureSync()">Secure Sync</button>
+      <p style="color:#666;font-size:12px;margin-top:8px;">Sync your vault to another device</p>
+    </div>
+
+    <h2>Session</h2>
+    <div class="section">
+      <button onclick="lockAll()" class="danger">Lock All</button>
+      <button onclick="clearAll()" class="danger">Clear All Data</button>
+    </div>
+
+    <div class="log" id="log"></div>
+  </div>
+
+  <div id="modal-container" class="hidden"></div>
+
+  <script type="module">
+    import * as vault from './index.js'
+    import * as pairing from './pairing.js'
+
+    window.vault = vault
+    window.pairing = pairing
+
+    let countdownInterval = null
+    let syncState = {}
+
+    function log(message, type = 'info') {
+      const logEl = document.getElementById('log')
+      const entry = document.createElement('div')
+      entry.className = `log-entry ${type}`
+      entry.textContent = `[${new Date().toLocaleTimeString()}] ${message}`
+      logEl.insertBefore(entry, logEl.firstChild)
+    }
+
+    function showModal(content) {
+      const container = document.getElementById('modal-container')
+      container.innerHTML = `<div class="modal" onclick="if(event.target===this)hideModal()"><div class="modal-content">${content}</div></div>`
+      container.classList.remove('hidden')
+    }
+
+    window.hideModal = function() {
+      document.getElementById('modal-container').classList.add('hidden')
+      if (countdownInterval) {
+        clearInterval(countdownInterval)
+        countdownInterval = null
+      }
+      syncState = {}
+    }
+
+    function startCountdown(elementId, seconds, onExpire) {
+      let remaining = seconds
+      const el = document.getElementById(elementId)
+      if (el) el.textContent = `${remaining}s remaining`
+
+      countdownInterval = setInterval(() => {
+        remaining--
+        if (el) el.textContent = `${remaining}s remaining`
+        if (remaining <= 0) {
+          clearInterval(countdownInterval)
+          countdownInterval = null
+          if (onExpire) onExpire()
+        }
+      }, 1000)
+    }
+
+    function showLockout(type, remaining) {
+      const display = document.getElementById('lockout-display')
+      display.innerHTML = `<div class="lockout-msg">Too many ${type} attempts. Wait ${remaining}s</div>`
+
+      const interval = setInterval(() => {
+        remaining--
+        if (remaining <= 0) {
+          clearInterval(interval)
+          display.innerHTML = ''
+        } else {
+          display.innerHTML = `<div class="lockout-msg">Too many ${type} attempts. Wait ${remaining}s</div>`
+        }
+      }, 1000)
+    }
+
+    function generateQRCode(data, size = 200) {
+      const matrix = generateQRMatrix(data)
+      const moduleCount = matrix.length
+      const moduleSize = Math.floor(size / moduleCount)
+      const actualSize = moduleSize * moduleCount
+
+      let svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${actualSize}" height="${actualSize}" viewBox="0 0 ${moduleCount} ${moduleCount}">`
+      svg += `<rect width="${moduleCount}" height="${moduleCount}" fill="white"/>`
+
+      for (let row = 0; row < moduleCount; row++) {
+        for (let col = 0; col < moduleCount; col++) {
+          if (matrix[row][col]) {
+            svg += `<rect x="${col}" y="${row}" width="1" height="1" fill="black"/>`
+          }
+        }
+      }
+
+      svg += '</svg>'
+      return svg
+    }
+
+    function generateQRMatrix(data) {
+      const version = getMinVersion(data.length)
+      const size = version * 4 + 17
+      const matrix = Array(size).fill(null).map(() => Array(size).fill(null))
+      const reserved = Array(size).fill(null).map(() => Array(size).fill(false))
+
+      addFinderPatterns(matrix, reserved, size)
+      addAlignmentPatterns(matrix, reserved, version)
+      addTimingPatterns(matrix, reserved, size)
+      matrix[version * 4 + 9][8] = true
+      reserved[version * 4 + 9][8] = true
+      reserveFormatArea(reserved, size)
+
+      const dataCodewords = encodeData(data, version)
+      const finalCodewords = addErrorCorrection(dataCodewords, version)
+      placeDataBits(matrix, reserved, size, finalCodewords)
+
+      const bestMask = findBestMask(matrix, reserved, size)
+      applyMask(matrix, reserved, size, bestMask)
+      addFormatInfo(matrix, size, bestMask)
+
+      return matrix
+    }
+
+    function getMinVersion(len) {
+      const caps = [17,32,53,78,106,134,154,192,230,271]
+      for (let v = 1; v <= 10; v++) if (caps[v-1] >= len) return v
+      return 10
+    }
+
+    function addFinderPatterns(matrix, reserved, size) {
+      const positions = [[0,0], [size-7,0], [0,size-7]]
+      for (const [row, col] of positions) {
+        for (let r = -1; r <= 7; r++) {
+          for (let c = -1; c <= 7; c++) {
+            const rr = row + r, cc = col + c
+            if (rr < 0 || rr >= size || cc < 0 || cc >= size) continue
+            if (r >= 0 && r <= 6 && c >= 0 && c <= 6) {
+              const isBlack = r === 0 || r === 6 || c === 0 || c === 6 || (r >= 2 && r <= 4 && c >= 2 && c <= 4)
+              matrix[rr][cc] = isBlack
+            } else {
+              matrix[rr][cc] = false
+            }
+            reserved[rr][cc] = true
+          }
+        }
+      }
+    }
+
+    function addAlignmentPatterns(matrix, reserved, version) {
+      if (version < 2) return
+      const positions = getAlignmentPositions(version)
+      for (const row of positions) {
+        for (const col of positions) {
+          if (reserved[row]?.[col]) continue
+          for (let r = -2; r <= 2; r++) {
+            for (let c = -2; c <= 2; c++) {
+              const isBlack = r === -2 || r === 2 || c === -2 || c === 2 || (r === 0 && c === 0)
+              matrix[row + r][col + c] = isBlack
+              reserved[row + r][col + c] = true
+            }
+          }
+        }
+      }
+    }
+
+    function getAlignmentPositions(version) {
+      if (version === 1) return []
+      const size = version * 4 + 17
+      if (version <= 6) return [6, size - 7]
+      const intervals = [0,0,18,22,26,30,34,22,24,26,28]
+      const step = intervals[version] || 28
+      const positions = [6]
+      let pos = size - 7
+      while (pos > 6 + step) { positions.unshift(pos); pos -= step }
+      positions.unshift(pos)
+      return positions
+    }
+
+    function addTimingPatterns(matrix, reserved, size) {
+      for (let i = 8; i < size - 8; i++) {
+        matrix[6][i] = i % 2 === 0
+        matrix[i][6] = i % 2 === 0
+        reserved[6][i] = true
+        reserved[i][6] = true
+      }
+    }
+
+    function reserveFormatArea(reserved, size) {
+      for (let i = 0; i < 9; i++) { reserved[8][i] = true; reserved[i][8] = true }
+      for (let i = 0; i < 8; i++) { reserved[8][size - 1 - i] = true; reserved[size - 1 - i][8] = true }
+    }
+
+    function encodeData(data, version) {
+      const totalCodewords = [0,26,44,70,100,134,172,196,242,292,346][version]
+      const ecCodewords = [0,10,16,26,18,24,16,18,22,22,26][version]
+      const dataCodewords = totalCodewords - ecCodewords
+
+      let bits = '0100'
+      bits += data.length.toString(2).padStart(version < 10 ? 8 : 16, '0')
+      for (let i = 0; i < data.length; i++) bits += data.charCodeAt(i).toString(2).padStart(8, '0')
+
+      const maxBits = dataCodewords * 8
+      bits += '0000'.slice(0, Math.min(4, maxBits - bits.length))
+      while (bits.length % 8 !== 0) bits += '0'
+      while (bits.length < maxBits) { bits += '11101100'; if (bits.length < maxBits) bits += '00010001' }
+
+      const codewords = []
+      for (let i = 0; i < bits.length; i += 8) codewords.push(parseInt(bits.substr(i, 8), 2))
+      return codewords
+    }
+
+    function addErrorCorrection(dataCodewords, version) {
+      const ecCounts = [0,10,16,26,18,24,16,18,22,22,26]
+      const ecCount = ecCounts[version]
+      const ecCodewords = generateEC(dataCodewords, ecCount)
+      return [...dataCodewords, ...ecCodewords]
+    }
+
+    function generateEC(data, ecCount) {
+      const gf = createGF()
+      const gen = createGenerator(ecCount, gf)
+      const msg = [...data, ...Array(ecCount).fill(0)]
+      for (let i = 0; i < data.length; i++) {
+        const coef = msg[i]
+        if (coef !== 0) for (let j = 0; j < gen.length; j++) msg[i + j] ^= gf.mul(gen[j], coef)
+      }
+      return msg.slice(data.length)
+    }
+
+    function createGF() {
+      const exp = new Array(512), log = new Array(256)
+      let x = 1
+      for (let i = 0; i < 255; i++) { exp[i] = x; log[x] = i; x <<= 1; if (x >= 256) x ^= 0x11d }
+      for (let i = 255; i < 512; i++) exp[i] = exp[i - 255]
+      return { exp, log, mul: (a, b) => a === 0 || b === 0 ? 0 : exp[log[a] + log[b]] }
+    }
+
+    function createGenerator(degree, gf) {
+      let poly = [1]
+      for (let i = 0; i < degree; i++) {
+        const newPoly = new Array(poly.length + 1).fill(0)
+        for (let j = 0; j < poly.length; j++) { newPoly[j] ^= poly[j]; newPoly[j + 1] ^= gf.mul(poly[j], gf.exp[i]) }
+        poly = newPoly
+      }
+      return poly
+    }
+
+    function placeDataBits(matrix, reserved, size, codewords) {
+      const bits = codewords.flatMap(b => b.toString(2).padStart(8, '0').split('').map(Number))
+      let bitIndex = 0, col = size - 1, goingUp = true
+      while (col > 0) {
+        if (col === 6) col--
+        for (let i = 0; i < size; i++) {
+          const row = goingUp ? size - 1 - i : i
+          for (let c = 0; c < 2; c++) {
+            const cc = col - c
+            if (!reserved[row][cc]) { matrix[row][cc] = bitIndex < bits.length ? bits[bitIndex++] === 1 : false }
+          }
+        }
+        col -= 2; goingUp = !goingUp
+      }
+    }
+
+    function findBestMask(matrix, reserved, size) {
+      let bestMask = 0, bestPenalty = Infinity
+      for (let mask = 0; mask < 8; mask++) {
+        const test = matrix.map(row => [...row])
+        applyMask(test, reserved, size, mask)
+        const penalty = calcPenalty(test, size)
+        if (penalty < bestPenalty) { bestPenalty = penalty; bestMask = mask }
+      }
+      return bestMask
+    }
+
+    function applyMask(matrix, reserved, size, mask) {
+      for (let row = 0; row < size; row++) {
+        for (let col = 0; col < size; col++) {
+          if (reserved[row][col]) continue
+          let invert = false
+          switch (mask) {
+            case 0: invert = (row + col) % 2 === 0; break
+            case 1: invert = row % 2 === 0; break
+            case 2: invert = col % 3 === 0; break
+            case 3: invert = (row + col) % 3 === 0; break
+            case 4: invert = (Math.floor(row / 2) + Math.floor(col / 3)) % 2 === 0; break
+            case 5: invert = ((row * col) % 2) + ((row * col) % 3) === 0; break
+            case 6: invert = (((row * col) % 2) + ((row * col) % 3)) % 2 === 0; break
+            case 7: invert = (((row + col) % 2) + ((row * col) % 3)) % 2 === 0; break
+          }
+          if (invert) matrix[row][col] = !matrix[row][col]
+        }
+      }
+    }
+
+    function calcPenalty(matrix, size) {
+      let penalty = 0
+      for (let row = 0; row < size; row++) {
+        let count = 1
+        for (let col = 1; col < size; col++) {
+          if (matrix[row][col] === matrix[row][col - 1]) { count++; if (count === 5) penalty += 3; else if (count > 5) penalty++ }
+          else count = 1
+        }
+      }
+      for (let col = 0; col < size; col++) {
+        let count = 1
+        for (let row = 1; row < size; row++) {
+          if (matrix[row][col] === matrix[row - 1][col]) { count++; if (count === 5) penalty += 3; else if (count > 5) penalty++ }
+          else count = 1
+        }
+      }
+      return penalty
+    }
+
+    function addFormatInfo(matrix, size, mask) {
+      const formatBits = (0 << 3) | mask
+      let d = formatBits << 10
+      for (let i = 0; i < 5; i++) if (d & (1 << (14 - i))) d ^= 0x537 << (4 - i)
+      const formatInfo = ((formatBits << 10) | d) ^ 0x5412
+      const bits = formatInfo.toString(2).padStart(15, '0').split('').map(Number)
+
+      for (let i = 0; i < 6; i++) matrix[8][i] = bits[14 - i] === 1
+      matrix[8][7] = bits[8] === 1; matrix[8][8] = bits[7] === 1; matrix[7][8] = bits[6] === 1
+      for (let i = 0; i < 6; i++) matrix[5 - i][8] = bits[i] === 1
+
+      for (let i = 0; i < 8; i++) matrix[8][size - 1 - i] = bits[14 - i] === 1
+      for (let i = 0; i < 7; i++) matrix[size - 7 + i][8] = bits[i] === 1
+    }
+
+    async function updateStatus() {
+      const status = await vault.auth.initAuth()
+      document.getElementById('status-fingerprint').className = `status ${status.hasFingerprint ? 'active' : 'inactive'}`
+      document.getElementById('status-pin').className = `status ${status.hasPIN ? 'active' : 'inactive'}`
+      document.getElementById('status-password').className = `status ${status.hasPassword ? 'active' : 'inactive'}`
+      document.getElementById('status-session').className = `status ${vault.session.hasMasterKey() ? 'active' : 'inactive'}`
+    }
+
+    async function getVaultInfo() {
+      const vaultData = await vault.store.getPasswordVault()
+      if (!vaultData) return { passwordCount: 0, lastModified: null }
+      const passwordCount = Object.values(vaultData.credentials || {}).flat().length
+      const lastModified = vaultData.meta?.lastAccess || vaultData.meta?.createdAt
+      return { passwordCount, lastModified }
+    }
+
+    window.showEnrollFingerprint = function() {
+      vault.auth.startFingerprintEnrollment()
+      const masterKey = vault.session.getMasterKey()
+      showModal(`
+        <h3>Enroll Fingerprint</h3>
+        ${masterKey ? '<p style="color:#888;margin-bottom:16px;">Adding fingerprint to existing vault.</p>' : '<p style="color:#888;margin-bottom:16px;">This will create a new vault.</p>'}
+        <div class="timer" id="enroll-timer">60s remaining</div>
+        <div style="margin-top:16px;">
+          <button onclick="enrollFingerprint()">Scan Fingerprint</button>
+          <button onclick="hideModal()" class="secondary">Cancel</button>
+        </div>
+      `)
+      startCountdown('enroll-timer', 60, () => {
+        hideModal()
+        log('Fingerprint enrollment expired', 'error')
+      })
+    }
+
+    window.enrollFingerprint = async function() {
+      log('Enrolling fingerprint...')
+      const masterKey = vault.session.getMasterKey()
+      const result = await vault.auth.enrollFingerprint(masterKey)
+      hideModal()
+      if (result.success) {
+        vault.session.setMasterKey(result.masterKey)
+        log('Fingerprint enrolled', 'success')
+      } else {
+        log(`Enrollment failed: ${result.error}`, 'error')
+      }
+      updateStatus()
+    }
+
+    window.authFingerprint = async function() {
+      log('Auth with fingerprint...')
+      const result = await vault.auth.authenticateFingerprint()
+      if (result.success) {
+        vault.session.setMasterKey(result.masterKey)
+        log('Auth successful', 'success')
+      } else {
+        if (result.error.includes('Wait')) {
+          const seconds = parseInt(result.error.match(/\d+/)[0])
+          showLockout('fingerprint', seconds)
+        }
+        log(`Auth failed: ${result.error}`, 'error')
+      }
+      updateStatus()
+    }
+
+    window.showSetPIN = function() {
+      vault.auth.startPINCreation()
+      const masterKey = vault.session.getMasterKey()
+      showModal(`
+        <h3>Set PIN</h3>
+        ${masterKey ? '<p style="color:#888;margin-bottom:16px;">Adding PIN to existing vault.</p>' : '<p style="color:#888;margin-bottom:16px;">This will create a new vault.</p>'}
+        <input type="text" id="modal-pin" placeholder="4-6 digits" maxlength="6">
+        <div class="timer" id="pin-timer">60s remaining</div>
+        <div style="margin-top:16px;">
+          <button onclick="setPIN()">Set PIN</button>
+          <button onclick="hideModal()" class="secondary">Cancel</button>
+        </div>
+      `)
+      startCountdown('pin-timer', 60, () => {
+        hideModal()
+        log('PIN creation expired', 'error')
+      })
+    }
+
+    window.setPIN = async function() {
+      const pin = document.getElementById('modal-pin').value
+      const masterKey = vault.session.getMasterKey()
+      const result = await vault.auth.setPIN(pin, masterKey)
+      hideModal()
+      if (result.success) {
+        vault.session.setMasterKey(result.masterKey)
+        log('PIN set', 'success')
+        if (result.isNewVault) log('New vault created', 'success')
+      } else {
+        log(`Set PIN failed: ${result.error}`, 'error')
+      }
+      updateStatus()
+    }
+
+    window.authPIN = async function() {
+      const pin = document.getElementById('pin-input').value
+      const result = await vault.auth.authenticatePIN(pin)
+      if (result.success) {
+        vault.session.setMasterKey(result.masterKey)
+        log('Auth successful', 'success')
+      } else {
+        if (result.error.includes('Wait')) {
+          const seconds = parseInt(result.error.match(/\d+/)[0])
+          showLockout('PIN', seconds)
+        }
+        log(`Auth failed: ${result.error}`, 'error')
+      }
+      updateStatus()
+    }
+
+    window.showSetPassword = function() {
+      vault.auth.startPasswordCreation()
+      const masterKey = vault.session.getMasterKey()
+      showModal(`
+        <h3>Set Password</h3>
+        ${masterKey ? '<p style="color:#888;margin-bottom:16px;">Adding password to existing vault.</p>' : '<p style="color:#888;margin-bottom:16px;">This will create a new vault.</p>'}
+        <input type="password" id="modal-password" placeholder="8+ characters">
+        <div class="timer" id="password-timer">60s remaining</div>
+        <div style="margin-top:16px;">
+          <button onclick="setPassword()">Set Password</button>
+          <button onclick="hideModal()" class="secondary">Cancel</button>
+        </div>
+      `)
+      startCountdown('password-timer', 60, () => {
+        hideModal()
+        log('Password creation expired', 'error')
+      })
+    }
+
+    window.setPassword = async function() {
+      const password = document.getElementById('modal-password').value
+      const masterKey = vault.session.getMasterKey()
+      const result = await vault.auth.setPassword(password, masterKey)
+      hideModal()
+      if (result.success) {
+        vault.session.setMasterKey(result.masterKey)
+        log('Password set', 'success')
+        if (result.isNewVault) log('New vault created', 'success')
+      } else {
+        log(`Set password failed: ${result.error}`, 'error')
+      }
+      updateStatus()
+    }
+
+    window.authPassword = async function() {
+      const password = document.getElementById('password-input').value
+      const result = await vault.auth.authenticatePassword(password)
+      if (result.success) {
+        vault.session.setMasterKey(result.masterKey)
+        log('Auth successful', 'success')
+      } else {
+        if (result.error.includes('Wait')) {
+          const seconds = parseInt(result.error.match(/\d+/)[0])
+          showLockout('password', seconds)
+        }
+        log(`Auth failed: ${result.error}`, 'error')
+      }
+      updateStatus()
+    }
+
+    window.showSaveCredential = function() {
+      if (!vault.session.hasMasterKey()) { log('Auth required', 'error'); return }
+      const domain = document.getElementById('domain-input').value || 'website.com'
+      showModal(`
+        <h3>Add Credential</h3>
+        <input type="text" id="modal-domain" value="${domain}" placeholder="website.com">
+        <input type="text" id="modal-login" placeholder="Login">
+        <input type="password" id="modal-password-cred" placeholder="Password">
+        <div style="margin-top:16px;">
+          <button onclick="saveCredential()">Save</button>
+          <button onclick="hideModal()" class="secondary">Cancel</button>
+        </div>
+      `)
+    }
+
+    window.saveCredential = async function() {
+      const masterKey = vault.session.getMasterKey()
+      if (!masterKey) { log('Not authenticated', 'error'); hideModal(); return }
+      const domain = document.getElementById('modal-domain').value
+      const login = document.getElementById('modal-login').value
+      const password = document.getElementById('modal-password-cred').value
+      const result = await vault.passwords.saveCredential(domain, login, password, masterKey)
+      if (result.success) {
+        log(`Credential saved for ${domain}`, 'success')
+        document.getElementById('domain-input').value = domain
+        loadCredentials()
+      } else {
+        log(`Save failed: ${result.error}`, 'error')
+      }
+      hideModal()
+    }
+
+    window.loadCredentials = async function() {
+      const masterKey = vault.session.getMasterKey()
+      const domain = document.getElementById('domain-input').value
+      const listEl = document.getElementById('credentials-list')
+      if (!masterKey) { listEl.innerHTML = '<p style="color:#666;padding:8px 0;">Auth required</p>'; return }
+      if (!domain) { listEl.innerHTML = '<p style="color:#666;padding:8px 0;">Enter domain to load</p>'; return }
+      const result = await vault.passwords.getCredentials(domain, masterKey)
+      if (!result.success) { listEl.innerHTML = `<p style="color:#e74c3c;padding:8px 0;">${result.error}</p>`; return }
+      if (result.credentials.length === 0) { listEl.innerHTML = '<p style="color:#666;padding:8px 0;">No credentials for this domain</p>'; return }
+      listEl.innerHTML = result.credentials.map(c => `
+        <div class="credential-row" data-id="${c.id}">
+          <div class="credential-info">
+            <div class="credential-login">${c.username}</div>
+            <div class="credential-pass" data-visible="false">••••••••</div>
+          </div>
+          <button class="eyeball" onclick="togglePassword(this, '${c.password.replace(/'/g, "\\'")}')">
+            <svg viewBox="0 0 24 24"><path d="M12 4.5C7 4.5 2.73 7.61 1 12c1.73 4.39 6 7.5 11 7.5s9.27-3.11 11-7.5c-1.73-4.39-6-7.5-11-7.5zM12 17c-2.76 0-5-2.24-5-5s2.24-5 5-5 5 2.24 5 5-2.24 5-5 5zm0-8c-1.66 0-3 1.34-3 3s1.34 3 3 3 3-1.34 3-3-1.34-3-3-3z"/></svg>
+          </button>
+          <button class="small danger" onclick="deleteCredential('${c.id}')">X</button>
+        </div>
+      `).join('')
+    }
+
+    window.togglePassword = function(btn, password) {
+      const passEl = btn.parentElement.querySelector('.credential-pass')
+      const visible = passEl.dataset.visible === 'true'
+      passEl.textContent = visible ? '••••••••' : password
+      passEl.dataset.visible = !visible
+    }
+
+    window.deleteCredential = async function(id) {
+      if (!confirm('Delete this credential?')) return
+      const result = await vault.passwords.deleteCredential(id)
+      if (result.success) { log('Credential deleted', 'success'); loadCredentials() }
+      else log(`Delete failed: ${result.error}`, 'error')
+    }
+
+    window.startSecureSync = async function() {
+      if (!vault.session.hasMasterKey()) { log('Auth required to sync', 'error'); return }
+      const vaultInfo = await getVaultInfo()
+      log('Starting Secure Sync...')
+      const pairData = await pairing.initiatePairing()
+      syncState = { ...pairData }
+      const qrSvg = generateQRCode(pairData.qrData, 200)
+      showModal(`
+        <h3>Secure Sync</h3>
+        <p class="sync-step active">Scan this QR on the other device</p>
+        <div class="qr-wrapper"><div class="qr-container">${qrSvg}</div></div>
+        <div class="vault-info">
+          <div class="vault-info-row"><span class="vault-info-label">Passwords</span><span class="vault-info-value">${vaultInfo.passwordCount}</span></div>
+          <div class="vault-info-row"><span class="vault-info-label">Last Modified</span><span class="vault-info-value">${vaultInfo.lastModified ? new Date(vaultInfo.lastModified).toLocaleString() : 'Never'}</span></div>
+        </div>
+        <div class="timer" id="sync-timer">60s remaining</div>
+        <div style="margin-top:16px;">
+          <button onclick="syncEnterResponse()">Other Device Ready</button>
+          <button onclick="hideModal()" class="secondary">Cancel</button>
+        </div>
+      `)
+      startCountdown('sync-timer', 60, () => { hideModal(); log('Sync expired', 'error') })
+    }
+
+    window.syncEnterResponse = function() {
+      showModal(`
+        <h3>Secure Sync</h3>
+        <p class="sync-step active">Enter response from other device</p>
+        <textarea id="sync-response-data" rows="4" placeholder="Paste response data"></textarea>
+        <div style="margin-top:16px;">
+          <button onclick="syncProcessResponse()">Verify</button>
+          <button onclick="hideModal()" class="secondary">Cancel</button>
+        </div>
+      `)
+    }
+
+    window.syncProcessResponse = async function() {
+      const responseData = document.getElementById('sync-response-data').value.trim()
+      let parsed
+      try { parsed = JSON.parse(responseData) } catch (e) { log('Invalid response format', 'error'); return }
+
+      if (parsed.type === 'valid-vault-pair-response') {
+        const result = await pairing.completePairing(syncState.privateKey, parsed.publicKey)
+        syncState.sharedKey = result.sharedKey
+        syncState.pin = result.pin
+
+        const myVault = await vault.store.getPasswordVault()
+        const myTimestamp = myVault?.meta?.lastAccess || myVault?.meta?.createdAt || 0
+
+        if (parsed.timestamp && parsed.timestamp > myTimestamp) {
+          showModal(`
+            <h3>You Have the Latest Version</h3>
+            <p style="color:#888;margin-bottom:16px;">The other device has a more recent vault.</p>
+            <p style="color:#e74c3c;">To update this device, initiate Secure Sync from the other device instead.</p>
+            <div style="margin-top:16px;"><button onclick="hideModal()">OK</button></div>
+          `)
+          return
+        }
+
+        showModal(`
+          <h3>Verify PIN</h3>
+          <p class="sync-step active">Confirm this PIN matches the other device</p>
+          <div class="pin-display">${result.pin}</div>
+          <p style="color:#888;text-align:center;margin-bottom:16px;">Both devices must show the same PIN</p>
+          <div style="margin-top:16px;">
+            <button onclick="syncConfirmAndSend()">PINs Match - Sync</button>
+            <button onclick="hideModal()" class="danger">PINs Don't Match</button>
+          </div>
+        `)
+      } else if (parsed.iv && parsed.ciphertext) {
+        if (!syncState.sharedKey) { log('No active sync session', 'error'); return }
+        try {
+          const decrypted = await pairing.decryptTransfer(parsed, syncState.sharedKey)
+          const result = await pairing.receiveTransfer(decrypted)
+          if (result.success) {
+            vault.session.setMasterKey(result.masterKey)
+            hideModal()
+            log(`Vault synced: ${result.imported.passwordCount} passwords`, 'success')
+            updateStatus()
+          } else log(`Sync failed: ${result.error}`, 'error')
+        } catch (e) { log(`Decryption failed: ${e.message}`, 'error') }
+      } else log('Unknown response format', 'error')
+    }
+
+    window.syncConfirmAndSend = async function() {
+      log('Preparing vault for sync...')
+      const masterKey = vault.session.getMasterKey()
+      const transfer = await pairing.prepareTransfer(masterKey)
+      if (!transfer.success) { log(`Sync failed: ${transfer.error}`, 'error'); hideModal(); return }
+      const encrypted = await pairing.encryptTransfer(transfer.data, syncState.sharedKey)
+      const payload = JSON.stringify(encrypted)
+      showModal(`
+        <h3>Sync Ready</h3>
+        <p class="sync-step active">Send this to the other device</p>
+        <textarea id="sync-payload" rows="5" readonly>${payload}</textarea>
+        <p style="color:#00d4aa;text-align:center;margin-top:12px;">Syncing ${transfer.meta.passwordCount} passwords</p>
+        <div style="margin-top:16px;">
+          <button onclick="copyPayload()">Copy</button>
+          <button onclick="hideModal()" class="secondary">Done</button>
+        </div>
+      `)
+      log(`Vault ready to sync (${transfer.meta.passwordCount} passwords)`, 'success')
+    }
+
+    window.copyPayload = function() {
+      const textarea = document.getElementById('sync-payload')
+      textarea.select()
+      document.execCommand('copy')
+      log('Payload copied to clipboard', 'success')
+    }
+
+    window.syncScanQR = function() {
+      showModal(`
+        <h3>Secure Sync</h3>
+        <p class="sync-step active">Paste QR data from other device</p>
+        <textarea id="sync-qr-data" rows="4" placeholder="Paste QR data"></textarea>
+        <div style="margin-top:16px;">
+          <button onclick="syncProcessQR()">Connect</button>
+          <button onclick="hideModal()" class="secondary">Cancel</button>
+        </div>
+      `)
+    }
+
+    window.syncProcessQR = async function() {
+      const qrData = document.getElementById('sync-qr-data').value.trim()
+      const parsed = pairing.parseQR(qrData)
+      if (!parsed.success) { log(`Invalid QR: ${parsed.error}`, 'error'); return }
+      log('Processing sync request...')
+      const response = await pairing.respondToPairing(parsed.publicKey)
+      const myVault = await vault.store.getPasswordVault()
+      const myTimestamp = myVault?.meta?.lastAccess || myVault?.meta?.createdAt || 0
+      syncState = { sharedKey: response.sharedKey, pin: response.pin }
+      const responseWithTimestamp = { ...JSON.parse(response.responseData), timestamp: myTimestamp }
+      showModal(`
+        <h3>Secure Sync</h3>
+        <p class="sync-step active">Send this response to the other device</p>
+        <textarea id="sync-response" rows="4" readonly>${JSON.stringify(responseWithTimestamp)}</textarea>
+        <div class="pin-display">${response.pin}</div>
+        <p style="color:#888;text-align:center;">Verify this PIN matches the other device</p>
+        <div style="margin-top:16px;">
+          <button onclick="copyResponse()">Copy Response</button>
+          <button onclick="syncWaitForPayload()">Next</button>
+          <button onclick="hideModal()" class="secondary">Cancel</button>
+        </div>
+      `)
+    }
+
+    window.copyResponse = function() {
+      const textarea = document.getElementById('sync-response')
+      textarea.select()
+      document.execCommand('copy')
+      log('Response copied to clipboard', 'success')
+    }
+
+    window.syncWaitForPayload = function() {
+      showModal(`
+        <h3>Secure Sync</h3>
+        <p class="sync-step active">Enter vault data from other device</p>
+        <textarea id="sync-payload-input" rows="5" placeholder="Paste encrypted vault data"></textarea>
+        <div style="margin-top:16px;">
+          <button onclick="syncImport()">Import</button>
+          <button onclick="hideModal()" class="secondary">Cancel</button>
+        </div>
+      `)
+    }
+
+    window.syncImport = async function() {
+      const payloadData = document.getElementById('sync-payload-input').value.trim()
+      let encrypted
+      try { encrypted = JSON.parse(payloadData) } catch (e) { log('Invalid payload format', 'error'); return }
+      log('Importing vault...')
+      try {
+        const decrypted = await pairing.decryptTransfer(encrypted, syncState.sharedKey)
+        const result = await pairing.receiveTransfer(decrypted)
+        if (result.success) {
+          vault.session.setMasterKey(result.masterKey)
+          hideModal()
+          log(`Vault synced: ${result.imported.passwordCount} passwords`, 'success')
+          updateStatus()
+        } else log(`Import failed: ${result.error}`, 'error')
+      } catch (e) { log(`Decryption failed: ${e.message}`, 'error') }
+    }
+
+    window.lockAll = function() {
+      vault.session.lockAll()
+      document.getElementById('credentials-list').innerHTML = ''
+      log('Locked', 'success')
+      updateStatus()
+    }
+
+    window.clearAll = async function() {
+      if (!confirm('Clear ALL vault data? This cannot be undone.')) return
+      await vault.store.clearAll()
+      vault.session.lockAll()
+      document.getElementById('credentials-list').innerHTML = ''
+      log('All data cleared', 'success')
+      updateStatus()
+    }
+
+    updateStatus()
+    log('Valid Vault loaded')
+  </script>
+</body>
+</html>
