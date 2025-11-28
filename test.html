@@ -110,12 +110,1362 @@
 
   <div id="modal-container" class="hidden"></div>
 
-  <script type="module">
-    import * as vault from './index.js'
-    import * as pairing from './pairing.js'
+  <script>
 
-    window.vault = vault
-    window.pairing = pairing
+// Valid Vault - Bundled Build
+// Generated: 2025-11-28T03:00:45.314Z
+// This file is auto-generated. Do not edit directly.
+// Edit the source modules and run: node build.js
+
+// === crypto.js ===
+const cryptoModule = (function() {
+const SALT_LENGTH = 16
+const IV_LENGTH = 12
+const KEY_LENGTH = 256
+const HASH_ITERATIONS = 3
+const MASTER_KEY_LENGTH = 32
+
+async function generateSalt() {
+  return crypto.getRandomValues(new Uint8Array(SALT_LENGTH))
+}
+
+async function generateIV() {
+  return crypto.getRandomValues(new Uint8Array(IV_LENGTH))
+}
+
+async function generateMasterKey() {
+  return crypto.getRandomValues(new Uint8Array(MASTER_KEY_LENGTH))
+}
+
+async function deriveKeyFromSecret(secret, salt) {
+  const encoder = new TextEncoder()
+  const keyMaterial = await crypto.subtle.importKey(
+    'raw',
+    typeof secret === 'string' ? encoder.encode(secret) : secret,
+    'PBKDF2',
+    false,
+    ['deriveKey']
+  )
+  
+  return crypto.subtle.deriveKey(
+    {
+      name: 'PBKDF2',
+      salt: salt,
+      iterations: 100000,
+      hash: 'SHA-256'
+    },
+    keyMaterial,
+    { name: 'AES-GCM', length: KEY_LENGTH },
+    false,
+    ['wrapKey', 'unwrapKey', 'encrypt', 'decrypt']
+  )
+}
+
+async function masterKeyToCryptoKey(masterKeyBytes) {
+  return crypto.subtle.importKey(
+    'raw',
+    masterKeyBytes,
+    { name: 'AES-GCM', length: KEY_LENGTH },
+    true,
+    ['encrypt', 'decrypt']
+  )
+}
+
+async function wrapMasterKey(masterKeyBytes, wrappingKey) {
+  const iv = await generateIV()
+  const masterKey = await crypto.subtle.importKey(
+    'raw',
+    masterKeyBytes,
+    { name: 'AES-GCM', length: KEY_LENGTH },
+    true,
+    ['encrypt', 'decrypt']
+  )
+  
+  const wrapped = await crypto.subtle.wrapKey(
+    'raw',
+    masterKey,
+    wrappingKey,
+    { name: 'AES-GCM', iv: iv }
+  )
+  
+  return {
+    iv: Array.from(iv),
+    wrapped: Array.from(new Uint8Array(wrapped))
+  }
+}
+
+async function unwrapMasterKey(wrappedData, unwrappingKey) {
+  const iv = new Uint8Array(wrappedData.iv)
+  const wrapped = new Uint8Array(wrappedData.wrapped)
+  
+  const masterKey = await crypto.subtle.unwrapKey(
+    'raw',
+    wrapped,
+    unwrappingKey,
+    { name: 'AES-GCM', iv: iv },
+    { name: 'AES-GCM', length: KEY_LENGTH },
+    true,
+    ['encrypt', 'decrypt']
+  )
+  
+  return masterKey
+}
+
+async function encrypt(plaintext, key) {
+  const encoder = new TextEncoder()
+  const iv = await generateIV()
+  const ciphertext = await crypto.subtle.encrypt(
+    { name: 'AES-GCM', iv: iv },
+    key,
+    encoder.encode(plaintext)
+  )
+  
+  return {
+    iv: Array.from(iv),
+    ciphertext: Array.from(new Uint8Array(ciphertext))
+  }
+}
+
+async function decrypt(encrypted, key) {
+  const decoder = new TextDecoder()
+  const iv = new Uint8Array(encrypted.iv)
+  const ciphertext = new Uint8Array(encrypted.ciphertext)
+  
+  const plaintext = await crypto.subtle.decrypt(
+    { name: 'AES-GCM', iv: iv },
+    key,
+    ciphertext
+  )
+  
+  return decoder.decode(plaintext)
+}
+
+async function argon2Hash(input, salt) {
+  const encoder = new TextEncoder()
+  const inputBytes = encoder.encode(input)
+  const saltBytes = salt instanceof Uint8Array ? salt : new Uint8Array(salt)
+  
+  let result = new Uint8Array(await crypto.subtle.digest('SHA-256', 
+    new Uint8Array([...inputBytes, ...saltBytes])
+  ))
+  
+  for (let i = 0; i < HASH_ITERATIONS; i++) {
+    const round = new Uint8Array([...result, ...saltBytes, i])
+    result = new Uint8Array(await crypto.subtle.digest('SHA-256', round))
+  }
+  
+  return Array.from(result)
+}
+
+async function hashPin(pin, salt) {
+  return argon2Hash(pin, salt)
+}
+
+async function hashPassword(password, salt) {
+  return argon2Hash(password, salt)
+}
+
+function arraysEqual(a, b) {
+  if (a.length !== b.length) return false
+  for (let i = 0; i < a.length; i++) {
+    if (a[i] !== b[i]) return false
+  }
+  return true
+}
+
+async function createBackupSignature(payload, key) {
+  const encoder = new TextEncoder()
+  const keyBytes = await crypto.subtle.exportKey('raw', key)
+  
+  const hmacKey = await crypto.subtle.importKey(
+    'raw',
+    keyBytes,
+    { name: 'HMAC', hash: 'SHA-256' },
+    false,
+    ['sign']
+  )
+  
+  const signature = await crypto.subtle.sign('HMAC', hmacKey, encoder.encode(payload))
+  return Array.from(new Uint8Array(signature))
+}
+
+async function verifyBackupSignature(payload, signature, key) {
+  const encoder = new TextEncoder()
+  const keyBytes = await crypto.subtle.exportKey('raw', key)
+  
+  const hmacKey = await crypto.subtle.importKey(
+    'raw',
+    keyBytes,
+    { name: 'HMAC', hash: 'SHA-256' },
+    false,
+    ['verify']
+  )
+  
+  return crypto.subtle.verify('HMAC', hmacKey, new Uint8Array(signature), encoder.encode(payload))
+}
+return {
+  generateSalt,
+  generateIV,
+  generateMasterKey,
+  deriveKeyFromSecret,
+  masterKeyToCryptoKey,
+  wrapMasterKey,
+  unwrapMasterKey,
+  encrypt,
+  decrypt,
+  hashPin,
+  hashPassword,
+  arraysEqual,
+  createBackupSignature,
+  verifyBackupSignature
+}
+})();
+
+// === store.js ===
+const storeModule = (function() {
+const DB_NAME = 'ValidVault'
+const DB_VERSION = 1
+
+let db = null
+
+async function openDB() {
+  if (db) return db
+  
+  return new Promise((resolve, reject) => {
+    const request = indexedDB.open(DB_NAME, DB_VERSION)
+    
+    request.onerror = () => reject(request.error)
+    
+    request.onsuccess = () => {
+      db = request.result
+      resolve(db)
+    }
+    
+    request.onupgradeneeded = (event) => {
+      const database = event.target.result
+      
+      if (!database.objectStoreNames.contains('auth')) {
+        database.createObjectStore('auth', { keyPath: 'id' })
+      }
+      
+      if (!database.objectStoreNames.contains('passwords')) {
+        database.createObjectStore('passwords', { keyPath: 'id' })
+      }
+      
+      if (!database.objectStoreNames.contains('wallets')) {
+        database.createObjectStore('wallets', { keyPath: 'id' })
+      }
+    }
+  })
+}
+
+async function getStore(storeName, mode) {
+  const database = await openDB()
+  const tx = database.transaction(storeName, mode)
+  return tx.objectStore(storeName)
+}
+
+async function get(storeName, key) {
+  const store = await getStore(storeName, 'readonly')
+  return new Promise((resolve, reject) => {
+    const request = store.get(key)
+    request.onerror = () => reject(request.error)
+    request.onsuccess = () => resolve(request.result || null)
+  })
+}
+
+async function put(storeName, data) {
+  const store = await getStore(storeName, 'readwrite')
+  return new Promise((resolve, reject) => {
+    const request = store.put(data)
+    request.onerror = () => reject(request.error)
+    request.onsuccess = () => resolve(request.result)
+  })
+}
+
+async function remove(storeName, key) {
+  const store = await getStore(storeName, 'readwrite')
+  return new Promise((resolve, reject) => {
+    const request = store.delete(key)
+    request.onerror = () => reject(request.error)
+    request.onsuccess = () => resolve()
+  })
+}
+
+async function getAuth() {
+  return get('auth', 'primary')
+}
+
+async function setAuth(authData) {
+  return put('auth', { id: 'primary', ...authData })
+}
+
+async function getPasswordVault() {
+  return get('passwords', 'vault')
+}
+
+async function setPasswordVault(vaultData) {
+  return put('passwords', { id: 'vault', ...vaultData })
+}
+
+async function getWalletVault() {
+  return get('wallets', 'vault')
+}
+
+async function setWalletVault(vaultData) {
+  return put('wallets', { id: 'vault', ...vaultData })
+}
+
+async function clearAll() {
+  const database = await openDB()
+  const stores = ['auth', 'passwords', 'wallets']
+  
+  for (const storeName of stores) {
+    const tx = database.transaction(storeName, 'readwrite')
+    const store = tx.objectStore(storeName)
+    store.clear()
+  }
+}
+return {
+  openDB,
+  get,
+  put,
+  remove,
+  getAuth,
+  setAuth,
+  getPasswordVault,
+  setPasswordVault,
+  getWalletVault,
+  setWalletVault,
+  clearAll
+}
+})();
+
+// === session.js ===
+const sessionModule = (function() {
+const session = {
+  masterKey: null,
+  unlockedDomains: new Set(),
+  lastActivity: 0,
+  timeoutId: null
+}
+
+const SESSION_TIMEOUT = 300000
+
+function setMasterKey(key) {
+  session.masterKey = key
+  session.lastActivity = Date.now()
+  startTimeout()
+}
+
+function getMasterKey() {
+  return session.masterKey
+}
+
+function hasMasterKey() {
+  return session.masterKey !== null
+}
+
+function unlockDomain(domain) {
+  session.unlockedDomains.add(domain)
+}
+
+function lockDomain(domain) {
+  session.unlockedDomains.delete(domain)
+}
+
+function isDomainUnlocked(domain) {
+  return session.unlockedDomains.has(domain)
+}
+
+function getUnlockedDomains() {
+  return Array.from(session.unlockedDomains)
+}
+
+function resetActivity() {
+  session.lastActivity = Date.now()
+}
+
+function checkTimeout() {
+  if (!session.masterKey) return false
+  
+  const elapsed = Date.now() - session.lastActivity
+  if (elapsed >= SESSION_TIMEOUT) {
+    lockAll()
+    return true
+  }
+  
+  return false
+}
+
+function startTimeout() {
+  stopTimeout()
+  session.timeoutId = setInterval(() => {
+    if (checkTimeout()) {
+      console.log('Session locked due to inactivity')
+    }
+  }, 10000)
+}
+
+function stopTimeout() {
+  if (session.timeoutId) {
+    clearInterval(session.timeoutId)
+    session.timeoutId = null
+  }
+}
+
+function lockAll() {
+  session.masterKey = null
+  session.unlockedDomains.clear()
+  session.lastActivity = 0
+  stopTimeout()
+}
+
+function getState() {
+  return {
+    hasMasterKey: hasMasterKey(),
+    unlockedDomains: getUnlockedDomains(),
+    lastActivity: session.lastActivity
+  }
+}
+return {
+  setMasterKey,
+  getMasterKey,
+  hasMasterKey,
+  unlockDomain,
+  lockDomain,
+  isDomainUnlocked,
+  getUnlockedDomains,
+  resetActivity,
+  checkTimeout,
+  lockAll,
+  getState
+}
+})();
+
+// === passwords.js ===
+const passwordsModule = (function() {
+const { encrypt, decrypt } = cryptoModule
+const { getPasswordVault, setPasswordVault } = storeModule
+function generateId() {
+  return crypto.randomUUID()
+}
+
+async function ensureVault() {
+  const existing = await getPasswordVault()
+  if (existing) return { success: true }
+  
+  const vault = {
+    meta: {
+      version: 1,
+      createdAt: Date.now(),
+      lastAccess: Date.now()
+    },
+    credentials: {}
+  }
+  
+  await setPasswordVault(vault)
+  return { success: true }
+}
+
+async function saveCredential(domain, username, password, masterKey) {
+  await ensureVault()
+  const vault = await getPasswordVault()
+  
+  const id = generateId()
+  const encUsername = await encrypt(username, masterKey)
+  const encPassword = await encrypt(password, masterKey)
+  
+  const credential = {
+    id,
+    username: encUsername,
+    password: encPassword,
+    createdAt: Date.now(),
+    updatedAt: Date.now()
+  }
+  
+  if (!vault.credentials[domain]) {
+    vault.credentials[domain] = []
+  }
+  
+  vault.credentials[domain].push(credential)
+  vault.meta.lastAccess = Date.now()
+  
+  await setPasswordVault(vault)
+  return { success: true, id }
+}
+
+async function getCredentials(domain, masterKey) {
+  await ensureVault()
+  const vault = await getPasswordVault()
+  
+  const domainCreds = vault.credentials[domain]
+  if (!domainCreds || domainCreds.length === 0) {
+    return { success: true, credentials: [] }
+  }
+  
+  const decrypted = []
+  for (const cred of domainCreds) {
+    try {
+      decrypted.push({
+        id: cred.id,
+        username: await decrypt(cred.username, masterKey),
+        password: await decrypt(cred.password, masterKey),
+        createdAt: cred.createdAt,
+        updatedAt: cred.updatedAt
+      })
+    } catch (error) {
+      return { success: false, error: 'Decryption failed' }
+    }
+  }
+  
+  return { success: true, credentials: decrypted }
+}
+
+async function getAllDomains() {
+  await ensureVault()
+  const vault = await getPasswordVault()
+  
+  return { success: true, domains: Object.keys(vault.credentials) }
+}
+
+async function updateCredential(credentialId, updates, masterKey) {
+  const vault = await getPasswordVault()
+  if (!vault) return { success: false, error: 'No vault' }
+  
+  for (const domain of Object.keys(vault.credentials)) {
+    const creds = vault.credentials[domain]
+    const index = creds.findIndex(c => c.id === credentialId)
+    
+    if (index !== -1) {
+      if (updates.username) {
+        creds[index].username = await encrypt(updates.username, masterKey)
+      }
+      if (updates.password) {
+        creds[index].password = await encrypt(updates.password, masterKey)
+      }
+      creds[index].updatedAt = Date.now()
+      vault.meta.lastAccess = Date.now()
+      
+      await setPasswordVault(vault)
+      return { success: true }
+    }
+  }
+  
+  return { success: false, error: 'Credential not found' }
+}
+
+async function deleteCredential(credentialId) {
+  const vault = await getPasswordVault()
+  if (!vault) return { success: false, error: 'No vault' }
+  
+  for (const domain of Object.keys(vault.credentials)) {
+    const creds = vault.credentials[domain]
+    const index = creds.findIndex(c => c.id === credentialId)
+    
+    if (index !== -1) {
+      creds.splice(index, 1)
+      
+      if (creds.length === 0) {
+        delete vault.credentials[domain]
+      }
+      
+      vault.meta.lastAccess = Date.now()
+      await setPasswordVault(vault)
+      return { success: true }
+    }
+  }
+  
+  return { success: false, error: 'Credential not found' }
+}
+
+async function autofill(domain, credentialId, masterKey) {
+  const result = await getCredentials(domain, masterKey)
+  if (!result.success) return result
+  
+  if (result.credentials.length === 0) {
+    return { success: false, error: 'No credentials for domain' }
+  }
+  
+  if (credentialId) {
+    const cred = result.credentials.find(c => c.id === credentialId)
+    if (cred) return { success: true, username: cred.username, password: cred.password }
+    return { success: false, error: 'Credential not found' }
+  }
+  
+  const cred = result.credentials[0]
+  return { success: true, username: cred.username, password: cred.password }
+}
+return {
+  ensureVault,
+  saveCredential,
+  getCredentials,
+  getAllDomains,
+  updateCredential,
+  deleteCredential,
+  autofill
+}
+})();
+
+// === auth.js ===
+const authModule = (function() {
+const {
+  generateSalt,
+  generateMasterKey,
+  deriveKeyFromSecret,
+  masterKeyToCryptoKey,
+  wrapMasterKey,
+  unwrapMasterKey,
+  hashPin,
+  hashPassword,
+  arraysEqual
+} = cryptoModule
+const { getAuth, setAuth } = storeModule
+generateSalt,
+  generateMasterKey,
+  deriveKeyFromSecret,
+  masterKeyToCryptoKey,
+  wrapMasterKey,
+  unwrapMasterKey,
+  hashPin,
+  hashPassword,
+  arraysEqual
+} from './crypto.js'
+
+
+const RP_NAME = 'Valid Vault'
+const RP_ID = location.hostname
+const FINGERPRINT_SECRET = 'valid-vault-fingerprint-auth-v1'
+
+const attempts = new Map()
+const LOCKOUT_MS = 60000
+const MAX_ATTEMPTS = 3
+const CREATION_TIMEOUT_MS = 60000
+
+const creationTimers = new Map()
+
+function checkRateLimit(type) {
+  const record = attempts.get(type)
+  if (!record) return { allowed: true }
+  if (Date.now() - record.lastAttempt > LOCKOUT_MS) {
+    attempts.delete(type)
+    return { allowed: true }
+  }
+  if (record.count >= MAX_ATTEMPTS) {
+    const remaining = Math.ceil((LOCKOUT_MS - (Date.now() - record.lastAttempt)) / 1000)
+    return { allowed: false, remaining }
+  }
+  return { allowed: true }
+}
+
+function recordFailedAttempt(type) {
+  const record = attempts.get(type) || { count: 0, lastAttempt: 0 }
+  record.count++
+  record.lastAttempt = Date.now()
+  attempts.set(type, record)
+}
+
+function clearAttempts(type) {
+  attempts.delete(type)
+}
+
+function startCreationTimer(type) {
+  cancelCreationTimer(type)
+  const timer = {
+    startedAt: Date.now(),
+    timeoutId: setTimeout(() => {
+      creationTimers.delete(type)
+    }, CREATION_TIMEOUT_MS)
+  }
+  creationTimers.set(type, timer)
+  return timer.startedAt
+}
+
+function checkCreationTimer(type) {
+  const timer = creationTimers.get(type)
+  if (!timer) return { valid: false, error: 'Creation session expired' }
+  if (Date.now() - timer.startedAt > CREATION_TIMEOUT_MS) {
+    creationTimers.delete(type)
+    return { valid: false, error: 'Creation session expired' }
+  }
+  return { valid: true, remaining: Math.ceil((CREATION_TIMEOUT_MS - (Date.now() - timer.startedAt)) / 1000) }
+}
+
+function cancelCreationTimer(type) {
+  const timer = creationTimers.get(type)
+  if (timer) {
+    clearTimeout(timer.timeoutId)
+    creationTimers.delete(type)
+  }
+}
+
+async function initAuth() {
+  const auth = await getAuth()
+  return {
+    hasFingerprint: !!(auth && auth.fingerprintEnabled),
+    hasPIN: !!(auth && auth.pinHash),
+    hasPassword: !!(auth && auth.passwordHash),
+    hasMasterKey: !!(auth && auth.masterKey),
+    isNew: !auth
+  }
+}
+
+function startFingerprintEnrollment() {
+  return startCreationTimer('fingerprint')
+}
+
+async function enrollFingerprint(existingMasterKey) {
+  const timerCheck = checkCreationTimer('fingerprint')
+  if (!timerCheck.valid) {
+    return { success: false, error: timerCheck.error }
+  }
+
+  try {
+    const challenge = crypto.getRandomValues(new Uint8Array(32))
+    const userId = new TextEncoder().encode('valid-vault-user')
+
+    const credential = await navigator.credentials.create({
+      publicKey: {
+        challenge: challenge,
+        rp: { name: RP_NAME, id: RP_ID },
+        user: {
+          id: userId,
+          name: 'vault-user',
+          displayName: 'Vault User'
+        },
+        pubKeyCredParams: [
+          { alg: -7, type: 'public-key' },
+          { alg: -257, type: 'public-key' }
+        ],
+        authenticatorSelection: {
+          authenticatorAttachment: 'platform',
+          userVerification: 'required',
+          residentKey: 'preferred'
+        },
+        timeout: 60000
+      }
+    })
+
+    const auth = await getAuth() || {}
+    
+    if (!auth.fingerprintSalt) {
+      auth.fingerprintSalt = Array.from(await generateSalt())
+    }
+
+    const salt = new Uint8Array(auth.fingerprintSalt)
+    const wrappingKey = await deriveKeyFromSecret(FINGERPRINT_SECRET, salt)
+
+    let masterKeyBytes
+    if (existingMasterKey) {
+      masterKeyBytes = existingMasterKey instanceof CryptoKey
+        ? new Uint8Array(await crypto.subtle.exportKey('raw', existingMasterKey))
+        : new Uint8Array(existingMasterKey)
+    } else if (auth.masterKey) {
+      masterKeyBytes = new Uint8Array(auth.masterKey)
+    } else {
+      masterKeyBytes = await generateMasterKey()
+      auth.masterKey = Array.from(masterKeyBytes)
+    }
+
+    const wrappedForFingerprint = await wrapMasterKey(masterKeyBytes, wrappingKey)
+    auth.fingerprintWrappedKey = wrappedForFingerprint
+    auth.fingerprintEnabled = true
+
+    await setAuth(auth)
+
+    const masterKey = await masterKeyToCryptoKey(masterKeyBytes)
+
+    cancelCreationTimer('fingerprint')
+    return { success: true, masterKey }
+  } catch (error) {
+    return { success: false, error: error.message }
+  }
+}
+
+async function authenticateFingerprint() {
+  const rateCheck = checkRateLimit('fingerprint')
+  if (!rateCheck.allowed) {
+    return { success: false, error: `Too many attempts. Wait ${rateCheck.remaining}s` }
+  }
+
+  try {
+    const auth = await getAuth()
+    if (!auth || !auth.fingerprintEnabled) {
+      return { success: false, error: 'No fingerprint enrolled' }
+    }
+
+    if (!auth.fingerprintWrappedKey) {
+      return { success: false, error: 'Fingerprint not configured properly' }
+    }
+
+    const challenge = crypto.getRandomValues(new Uint8Array(32))
+
+    await navigator.credentials.get({
+      publicKey: {
+        challenge: challenge,
+        rpId: RP_ID,
+        userVerification: 'required',
+        timeout: 60000
+      }
+    })
+
+    const salt = new Uint8Array(auth.fingerprintSalt)
+    const unwrappingKey = await deriveKeyFromSecret(FINGERPRINT_SECRET, salt)
+
+    const masterKey = await unwrapMasterKey(auth.fingerprintWrappedKey, unwrappingKey)
+
+    clearAttempts('fingerprint')
+    return { success: true, masterKey }
+  } catch (error) {
+    recordFailedAttempt('fingerprint')
+    return { success: false, error: error.message }
+  }
+}
+
+function startPINCreation() {
+  return startCreationTimer('pin')
+}
+
+async function setPIN(pin, existingMasterKey) {
+  const timerCheck = checkCreationTimer('pin')
+  if (!timerCheck.valid) {
+    return { success: false, error: timerCheck.error }
+  }
+
+  if (pin.length < 4 || pin.length > 6 || !/^\d+$/.test(pin)) {
+    return { success: false, error: 'PIN must be 4-6 digits' }
+  }
+
+  const auth = await getAuth() || {}
+  const salt = auth.pinSalt ? new Uint8Array(auth.pinSalt) : await generateSalt()
+  const hash = await hashPin(pin, salt)
+
+  auth.pinHash = hash
+  auth.pinSalt = Array.from(salt)
+
+  const wrappingKey = await deriveKeyFromSecret(pin, salt)
+
+  let masterKeyBytes
+  let isNewVault = false
+
+  if (existingMasterKey) {
+    masterKeyBytes = existingMasterKey instanceof CryptoKey
+      ? new Uint8Array(await crypto.subtle.exportKey('raw', existingMasterKey))
+      : new Uint8Array(existingMasterKey)
+  } else if (auth.masterKey) {
+    masterKeyBytes = new Uint8Array(auth.masterKey)
+  } else {
+    masterKeyBytes = await generateMasterKey()
+    auth.masterKey = Array.from(masterKeyBytes)
+    isNewVault = true
+  }
+
+  const wrappedForPIN = await wrapMasterKey(masterKeyBytes, wrappingKey)
+  auth.pinWrappedKey = wrappedForPIN
+
+  await setAuth(auth)
+
+  cancelCreationTimer('pin')
+
+  const masterKey = await masterKeyToCryptoKey(masterKeyBytes)
+  return { success: true, masterKey, isNewVault }
+}
+
+function startPasswordCreation() {
+  return startCreationTimer('password')
+}
+
+async function setPassword(password, existingMasterKey) {
+  const timerCheck = checkCreationTimer('password')
+  if (!timerCheck.valid) {
+    return { success: false, error: timerCheck.error }
+  }
+
+  if (password.length < 8) {
+    return { success: false, error: 'Password must be at least 8 characters' }
+  }
+
+  const auth = await getAuth() || {}
+  const salt = auth.passwordSalt ? new Uint8Array(auth.passwordSalt) : await generateSalt()
+  const hash = await hashPassword(password, salt)
+
+  auth.passwordHash = hash
+  auth.passwordSalt = Array.from(salt)
+
+  const wrappingKey = await deriveKeyFromSecret(password, salt)
+
+  let masterKeyBytes
+  let isNewVault = false
+
+  if (existingMasterKey) {
+    masterKeyBytes = existingMasterKey instanceof CryptoKey
+      ? new Uint8Array(await crypto.subtle.exportKey('raw', existingMasterKey))
+      : new Uint8Array(existingMasterKey)
+  } else if (auth.masterKey) {
+    masterKeyBytes = new Uint8Array(auth.masterKey)
+  } else {
+    masterKeyBytes = await generateMasterKey()
+    auth.masterKey = Array.from(masterKeyBytes)
+    isNewVault = true
+  }
+
+  const wrappedForPassword = await wrapMasterKey(masterKeyBytes, wrappingKey)
+  auth.passwordWrappedKey = wrappedForPassword
+
+  await setAuth(auth)
+
+  cancelCreationTimer('password')
+
+  const masterKey = await masterKeyToCryptoKey(masterKeyBytes)
+  return { success: true, masterKey, isNewVault }
+}
+
+async function authenticatePIN(pin) {
+  const rateCheck = checkRateLimit('pin')
+  if (!rateCheck.allowed) {
+    return { success: false, error: `Too many attempts. Wait ${rateCheck.remaining}s` }
+  }
+
+  const auth = await getAuth()
+  if (!auth || !auth.pinHash) {
+    return { success: false, error: 'No PIN set' }
+  }
+
+  const salt = new Uint8Array(auth.pinSalt)
+  const hash = await hashPin(pin, salt)
+
+  if (!arraysEqual(hash, auth.pinHash)) {
+    recordFailedAttempt('pin')
+    return { success: false, error: 'Invalid PIN' }
+  }
+
+  try {
+    const unwrappingKey = await deriveKeyFromSecret(pin, salt)
+    const masterKey = await unwrapMasterKey(auth.pinWrappedKey, unwrappingKey)
+
+    clearAttempts('pin')
+    return { success: true, masterKey }
+  } catch (error) {
+    recordFailedAttempt('pin')
+    return { success: false, error: 'Decryption failed' }
+  }
+}
+
+async function authenticatePassword(password) {
+  const rateCheck = checkRateLimit('password')
+  if (!rateCheck.allowed) {
+    return { success: false, error: `Too many attempts. Wait ${rateCheck.remaining}s` }
+  }
+
+  const auth = await getAuth()
+  if (!auth || !auth.passwordHash) {
+    return { success: false, error: 'No password set' }
+  }
+
+  const salt = new Uint8Array(auth.passwordSalt)
+  const hash = await hashPassword(password, salt)
+
+  if (!arraysEqual(hash, auth.passwordHash)) {
+    recordFailedAttempt('password')
+    return { success: false, error: 'Invalid password' }
+  }
+
+  try {
+    const unwrappingKey = await deriveKeyFromSecret(password, salt)
+    const masterKey = await unwrapMasterKey(auth.passwordWrappedKey, unwrappingKey)
+
+    clearAttempts('password')
+    return { success: true, masterKey }
+  } catch (error) {
+    recordFailedAttempt('password')
+    return { success: false, error: 'Decryption failed' }
+  }
+}
+
+async function removeFingerprint() {
+  const auth = await getAuth()
+  if (!auth) return { success: false, error: 'No auth configured' }
+
+  if (!auth.pinHash && !auth.passwordHash) {
+    return { success: false, error: 'Cannot remove fingerprint without PIN or password backup' }
+  }
+
+  delete auth.fingerprintEnabled
+  delete auth.fingerprintWrappedKey
+  await setAuth(auth)
+
+  return { success: true }
+}
+
+async function removePIN() {
+  const auth = await getAuth()
+  if (!auth) return { success: false, error: 'No auth configured' }
+
+  if (!auth.fingerprintEnabled && !auth.passwordHash) {
+    return { success: false, error: 'Cannot remove PIN without fingerprint or password backup' }
+  }
+
+  delete auth.pinHash
+  delete auth.pinSalt
+  delete auth.pinWrappedKey
+  await setAuth(auth)
+
+  return { success: true }
+}
+
+async function removePassword() {
+  const auth = await getAuth()
+  if (!auth) return { success: false, error: 'No auth configured' }
+
+  if (!auth.fingerprintEnabled && !auth.pinHash) {
+    return { success: false, error: 'Cannot remove password without fingerprint or PIN backup' }
+  }
+
+  delete auth.passwordHash
+  delete auth.passwordSalt
+  delete auth.passwordWrappedKey
+  await setAuth(auth)
+
+  return { success: true }
+}
+return {
+  initAuth,
+  startFingerprintEnrollment,
+  enrollFingerprint,
+  authenticateFingerprint,
+  startPINCreation,
+  setPIN,
+  startPasswordCreation,
+  setPassword,
+  authenticatePIN,
+  authenticatePassword,
+  removeFingerprint,
+  removePIN,
+  removePassword,
+  checkRateLimit,
+  checkCreationTimer
+}
+})();
+
+// === pairing.js ===
+const pairingModule = (function() {
+const { getPasswordVault, setPasswordVault, getAuth, setAuth } = storeModule
+const { createBackupSignature, verifyBackupSignature } = cryptoModule
+const PAIRING_TIMEOUT = 60000
+
+function generatePairingCode() {
+  const code = Math.floor(1000 + Math.random() * 9000)
+  return code.toString()
+}
+
+function generateSessionId() {
+  return crypto.randomUUID()
+}
+
+async function generateKeyPair() {
+  const keyPair = await crypto.subtle.generateKey(
+    { name: 'ECDH', namedCurve: 'P-256' },
+    true,
+    ['deriveKey', 'deriveBits']
+  )
+
+  const publicKeyRaw = await crypto.subtle.exportKey('raw', keyPair.publicKey)
+
+  return {
+    privateKey: keyPair.privateKey,
+    publicKey: Array.from(new Uint8Array(publicKeyRaw))
+  }
+}
+
+async function deriveSharedKey(privateKey, publicKeyRaw) {
+  const publicKey = await crypto.subtle.importKey(
+    'raw',
+    new Uint8Array(publicKeyRaw),
+    { name: 'ECDH', namedCurve: 'P-256' },
+    false,
+    []
+  )
+
+  return crypto.subtle.deriveKey(
+    { name: 'ECDH', public: publicKey },
+    privateKey,
+    { name: 'AES-GCM', length: 256 },
+    true,
+    ['encrypt', 'decrypt']
+  )
+}
+
+async function derivePinFromSharedKey(sharedKey) {
+  const keyBytes = await crypto.subtle.exportKey('raw', sharedKey)
+  const view = new DataView(keyBytes)
+  const num = view.getUint32(0, true)
+  return String(num % 10000).padStart(4, '0')
+}
+
+async function initiatePairing() {
+  const keyPair = await generateKeyPair()
+  const sessionId = generateSessionId()
+
+  const qrData = JSON.stringify({
+    type: 'valid-vault-pair',
+    sessionId,
+    publicKey: keyPair.publicKey
+  })
+
+  return {
+    qrData,
+    sessionId,
+    privateKey: keyPair.privateKey,
+    expiresAt: Date.now() + PAIRING_TIMEOUT
+  }
+}
+
+async function respondToPairing(sourcePublicKey) {
+  const keyPair = await generateKeyPair()
+  const sharedKey = await deriveSharedKey(keyPair.privateKey, sourcePublicKey)
+  const pin = await derivePinFromSharedKey(sharedKey)
+
+  const responseData = JSON.stringify({
+    type: 'valid-vault-pair-response',
+    publicKey: keyPair.publicKey
+  })
+
+  return {
+    responseData,
+    sharedKey,
+    pin
+  }
+}
+
+async function completePairing(privateKey, targetPublicKey) {
+  const sharedKey = await deriveSharedKey(privateKey, targetPublicKey)
+  const pin = await derivePinFromSharedKey(sharedKey)
+
+  return {
+    sharedKey,
+    pin
+  }
+}
+
+async function requestPairing() {
+  const code = generatePairingCode()
+  const sessionId = generateSessionId()
+  const keyPair = await generateKeyPair()
+
+  return {
+    code,
+    sessionId,
+    privateKey: keyPair.privateKey,
+    publicKey: keyPair.publicKey,
+    expiresAt: Date.now() + PAIRING_TIMEOUT
+  }
+}
+
+function parseQR(qrData) {
+  try {
+    const data = JSON.parse(qrData)
+    if (data.type !== 'valid-vault-pair') {
+      return { success: false, error: 'Invalid QR code' }
+    }
+    return { success: true, sessionId: data.sessionId, publicKey: data.publicKey }
+  } catch (error) {
+    return { success: false, error: 'Invalid QR format' }
+  }
+}
+
+function parseResponse(responseData) {
+  try {
+    const data = JSON.parse(responseData)
+    if (data.type !== 'valid-vault-pair-response') {
+      return { success: false, error: 'Invalid response' }
+    }
+    return { success: true, publicKey: data.publicKey }
+  } catch (error) {
+    return { success: false, error: 'Invalid response format' }
+  }
+}
+
+async function prepareTransfer(masterKey) {
+  const vault = await getPasswordVault()
+  const auth = await getAuth()
+
+  if (!vault) {
+    return { success: false, error: 'No vault to transfer' }
+  }
+
+  const passwordCount = Object.values(vault.credentials || {}).flat().length
+
+  const payload = JSON.stringify({
+    version: 1,
+    createdAt: Date.now(),
+    passwordCount,
+    vault: vault,
+    auth: {
+      masterKey: auth.masterKey,
+      fingerprintSalt: auth.fingerprintSalt || null,
+      fingerprintEnabled: auth.fingerprintEnabled || false,
+      fingerprintWrappedKey: auth.fingerprintWrappedKey || null,
+      pinSalt: auth.pinSalt || null,
+      pinHash: auth.pinHash || null,
+      pinWrappedKey: auth.pinWrappedKey || null,
+      passwordSalt: auth.passwordSalt || null,
+      passwordHash: auth.passwordHash || null,
+      passwordWrappedKey: auth.passwordWrappedKey || null
+    }
+  })
+
+  const masterKeyForSig = await crypto.subtle.importKey(
+    'raw',
+    new Uint8Array(auth.masterKey),
+    { name: 'AES-GCM', length: 256 },
+    false,
+    ['encrypt', 'decrypt']
+  )
+
+  const signature = await createBackupSignature(payload, masterKeyForSig)
+
+  return {
+    success: true,
+    data: {
+      payload,
+      signature
+    },
+    meta: {
+      passwordCount,
+      createdAt: Date.now()
+    }
+  }
+}
+
+async function encryptTransfer(transferData, sharedKey) {
+  const encoder = new TextEncoder()
+  const iv = crypto.getRandomValues(new Uint8Array(12))
+
+  const ciphertext = await crypto.subtle.encrypt(
+    { name: 'AES-GCM', iv },
+    sharedKey,
+    encoder.encode(JSON.stringify(transferData))
+  )
+
+  return {
+    iv: Array.from(iv),
+    ciphertext: Array.from(new Uint8Array(ciphertext))
+  }
+}
+
+async function decryptTransfer(encrypted, sharedKey) {
+  const decoder = new TextDecoder()
+
+  const plaintext = await crypto.subtle.decrypt(
+    { name: 'AES-GCM', iv: new Uint8Array(encrypted.iv) },
+    sharedKey,
+    new Uint8Array(encrypted.ciphertext)
+  )
+
+  return JSON.parse(decoder.decode(plaintext))
+}
+
+async function verifyTransfer(transferData, masterKeyBytes) {
+  const masterKey = await crypto.subtle.importKey(
+    'raw',
+    new Uint8Array(masterKeyBytes),
+    { name: 'AES-GCM', length: 256 },
+    false,
+    ['encrypt', 'decrypt']
+  )
+
+  const valid = await verifyBackupSignature(transferData.payload, transferData.signature, masterKey)
+
+  if (!valid) {
+    return { valid: false, error: 'Backup corrupted or tampered' }
+  }
+
+  const meta = JSON.parse(transferData.payload)
+  return {
+    valid: true,
+    createdAt: meta.createdAt,
+    passwordCount: meta.passwordCount
+  }
+}
+
+async function receiveTransfer(transferData) {
+  const data = JSON.parse(transferData.payload)
+
+  const verification = await verifyTransfer(transferData, data.auth.masterKey)
+  if (!verification.valid) {
+    return { success: false, error: verification.error }
+  }
+
+  const vault = data.vault
+  vault.meta.lastAccess = Date.now()
+  await setPasswordVault(vault)
+
+  await setAuth({
+    masterKey: data.auth.masterKey,
+    fingerprintSalt: data.auth.fingerprintSalt,
+    fingerprintEnabled: data.auth.fingerprintEnabled,
+    fingerprintWrappedKey: data.auth.fingerprintWrappedKey,
+    pinSalt: data.auth.pinSalt,
+    pinHash: data.auth.pinHash,
+    pinWrappedKey: data.auth.pinWrappedKey,
+    passwordSalt: data.auth.passwordSalt,
+    passwordHash: data.auth.passwordHash,
+    passwordWrappedKey: data.auth.passwordWrappedKey
+  })
+
+  const masterKey = await crypto.subtle.importKey(
+    'raw',
+    new Uint8Array(data.auth.masterKey),
+    { name: 'AES-GCM', length: 256 },
+    true,
+    ['encrypt', 'decrypt']
+  )
+
+  return {
+    success: true,
+    masterKey,
+    imported: {
+      passwordCount: verification.passwordCount
+    }
+  }
+}
+
+function isExpired(expiresAt) {
+  return Date.now() > expiresAt
+}
+return {
+  generatePairingCode,
+  generateSessionId,
+  initiatePairing,
+  respondToPairing,
+  completePairing,
+  requestPairing,
+  parseQR,
+  parseResponse,
+  prepareTransfer,
+  encryptTransfer,
+  decryptTransfer,
+  verifyTransfer,
+  receiveTransfer,
+  deriveSharedKey,
+  derivePinFromSharedKey,
+  isExpired
+}
+})();
+
+// === Unified API ===
+const vault = {
+  crypto: cryptoModule,
+  store: storeModule,
+  session: sessionModule,
+  passwords: passwordsModule,
+  auth: authModule,
+  pairing: pairingModule
+}
+const pairing = pairingModule
+
+window.vault = vault
+window.pairing = pairing
 
     let countdownInterval = null
     let syncState = {}
@@ -858,6 +2208,7 @@
 
     updateStatus()
     log('Valid Vault loaded')
-  </script>
+  
+
 </body>
 </html>
