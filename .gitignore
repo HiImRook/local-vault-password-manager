@@ -3,3 +3,4 @@ android/app/build/
 *.apk
 .gradle/
 build/
+app-debug.apk

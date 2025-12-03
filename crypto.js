@@ -119,7 +119,7 @@ async function decrypt(encrypted, key) {
   return decoder.decode(plaintext)
 }
 
-async function argon2Hash(input, salt) {
+async function sha256Kdf(input, salt) {
   const encoder = new TextEncoder()
   const inputBytes = encoder.encode(input)
   const saltBytes = salt instanceof Uint8Array ? salt : new Uint8Array(salt)
@@ -137,11 +137,11 @@ async function argon2Hash(input, salt) {
 }
 
 async function hashPin(pin, salt) {
-  return argon2Hash(pin, salt)
+  return sha256Kdf(pin, salt)
 }
 
 async function hashPassword(password, salt) {
-  return argon2Hash(password, salt)
+  return sha256Kdf(password, salt)
 }
 
 function arraysEqual(a, b) {
