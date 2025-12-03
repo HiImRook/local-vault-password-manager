@@ -1524,9 +1524,9 @@ function log(msg, type) {
 async function updateStatus() {
   try {
     var status = await vault.auth.initAuth()
-    document.getElementById('fp-status').className = 'status ' + (status.hasFingerprint ? 'active' : 'inactive')
-    document.getElementById('pin-status').className = 'status ' + (status.hasPIN ? 'active' : 'inactive')
-    document.getElementById('pw-status').className = 'status ' + (status.hasPassword ? 'active' : 'inactive')
+    document.getElementById('status-fingerprint').className = 'status ' + (status.hasFingerprint ? 'active' : 'inactive')
+    document.getElementById('status-pin').className = 'status ' + (status.hasPIN ? 'active' : 'inactive')
+    document.getElementById('status-password').className = 'status ' + (status.hasPassword ? 'active' : 'inactive')
     log('Status updated')
   } catch (e) {
     log('Status error: ' + e.message, 'error')
@@ -1543,7 +1543,7 @@ function hideModal() {
   document.getElementById('modal-container').classList.add('hidden')
 }
 
-window.showSetFingerprint = async function() {
+window.showEnrollFingerprint = async function() {
   vault.auth.startFingerprintEnrollment()
   log('Starting fingerprint enrollment...')
   var masterKey = vault.session.getMasterKey()
