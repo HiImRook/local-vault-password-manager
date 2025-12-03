@@ -77,14 +77,27 @@ function cancelCreationTimer(type) {
   }
 }
 
+function hasWrappedKeys(auth) {
+  if (!auth) return false
+  return !!(auth.fingerprintWrappedKey || auth.pinWrappedKey || auth.passwordWrappedKey)
+}
+
+async function migrateLegacyMasterKey() {
+  const auth = await getAuth()
+  if (auth && auth.masterKey) {
+    delete auth.masterKey
+    await setAuth(auth)
+  }
+}
+
 async function initAuth() {
   const auth = await getAuth()
   return {
     hasFingerprint: !!(auth && auth.fingerprintEnabled),
     hasPIN: !!(auth && auth.pinHash),
     hasPassword: !!(auth && auth.passwordHash),
-    hasMasterKey: !!(auth && auth.masterKey),
-    isNew: !auth
+    hasVault: hasWrappedKeys(auth),
+    isNew: !auth || !hasWrappedKeys(auth)
   }
 }
 
@@ -125,7 +138,7 @@ async function enrollFingerprint(existingMasterKey) {
     })
 
     const auth = await getAuth() || {}
-    
+
     if (!auth.fingerprintSalt) {
       auth.fingerprintSalt = Array.from(await generateSalt())
     }
@@ -134,15 +147,17 @@ async function enrollFingerprint(existingMasterKey) {
     const wrappingKey = await deriveKeyFromSecret(FINGERPRINT_SECRET, salt)
 
     let masterKeyBytes
+    let isNewVault = false
+
     if (existingMasterKey) {
       masterKeyBytes = existingMasterKey instanceof CryptoKey
         ? new Uint8Array(await crypto.subtle.exportKey('raw', existingMasterKey))
         : new Uint8Array(existingMasterKey)
-    } else if (auth.masterKey) {
-      masterKeyBytes = new Uint8Array(auth.masterKey)
+    } else if (hasWrappedKeys(auth)) {
+      return { success: false, error: 'Vault exists. Unlock first to add fingerprint.' }
     } else {
       masterKeyBytes = await generateMasterKey()
-      auth.masterKey = Array.from(masterKeyBytes)
+      isNewVault = true
     }
 
     const wrappedForFingerprint = await wrapMasterKey(masterKeyBytes, wrappingKey)
@@ -154,7 +169,7 @@ async function enrollFingerprint(existingMasterKey) {
     const masterKey = await masterKeyToCryptoKey(masterKeyBytes)
 
     cancelCreationTimer('fingerprint')
-    return { success: true, masterKey }
+    return { success: true, masterKey, isNewVault }
   } catch (error) {
     return { success: false, error: error.message }
   }
@@ -191,6 +206,8 @@ async function authenticateFingerprint() {
     const unwrappingKey = await deriveKeyFromSecret(FINGERPRINT_SECRET, salt)
 
     const masterKey = await unwrapMasterKey(auth.fingerprintWrappedKey, unwrappingKey)
+
+    await migrateLegacyMasterKey()
 
     clearAttempts('fingerprint')
     return { success: true, masterKey }
@@ -230,11 +247,10 @@ async function setPIN(pin, existingMasterKey) {
     masterKeyBytes = existingMasterKey instanceof CryptoKey
       ? new Uint8Array(await crypto.subtle.exportKey('raw', existingMasterKey))
       : new Uint8Array(existingMasterKey)
-  } else if (auth.masterKey) {
-    masterKeyBytes = new Uint8Array(auth.masterKey)
+  } else if (hasWrappedKeys(auth)) {
+    return { success: false, error: 'Vault exists. Unlock first to add PIN.' }
   } else {
     masterKeyBytes = await generateMasterKey()
-    auth.masterKey = Array.from(masterKeyBytes)
     isNewVault = true
   }
 
@@ -279,11 +295,10 @@ async function setPassword(password, existingMasterKey) {
     masterKeyBytes = existingMasterKey instanceof CryptoKey
       ? new Uint8Array(await crypto.subtle.exportKey('raw', existingMasterKey))
       : new Uint8Array(existingMasterKey)
-  } else if (auth.masterKey) {
-    masterKeyBytes = new Uint8Array(auth.masterKey)
+  } else if (hasWrappedKeys(auth)) {
+    return { success: false, error: 'Vault exists. Unlock first to add password.' }
   } else {
     masterKeyBytes = await generateMasterKey()
-    auth.masterKey = Array.from(masterKeyBytes)
     isNewVault = true
   }
 
@@ -321,6 +336,8 @@ async function authenticatePIN(pin) {
     const unwrappingKey = await deriveKeyFromSecret(pin, salt)
     const masterKey = await unwrapMasterKey(auth.pinWrappedKey, unwrappingKey)
 
+    await migrateLegacyMasterKey()
+
     clearAttempts('pin')
     return { success: true, masterKey }
   } catch (error) {
@@ -351,6 +368,8 @@ async function authenticatePassword(password) {
   try {
     const unwrappingKey = await deriveKeyFromSecret(password, salt)
     const masterKey = await unwrapMasterKey(auth.passwordWrappedKey, unwrappingKey)
+
+    await migrateLegacyMasterKey()
 
     clearAttempts('password')
     return { success: true, masterKey }

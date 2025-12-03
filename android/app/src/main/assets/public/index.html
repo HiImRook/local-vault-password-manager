@@ -777,27 +777,14 @@ function cancelCreationTimer(type) {
   }
 }
 
-function hasWrappedKeys(auth) {
-  if (!auth) return false
-  return !!(auth.fingerprintWrappedKey || auth.pinWrappedKey || auth.passwordWrappedKey)
-}
-
-async function migrateLegacyMasterKey() {
-  const auth = await getAuth()
-  if (auth && auth.masterKey) {
-    delete auth.masterKey
-    await setAuth(auth)
-  }
-}
-
 async function initAuth() {
   const auth = await getAuth()
   return {
     hasFingerprint: !!(auth && auth.fingerprintEnabled),
     hasPIN: !!(auth && auth.pinHash),
     hasPassword: !!(auth && auth.passwordHash),
-    hasVault: hasWrappedKeys(auth),
-    isNew: !auth || !hasWrappedKeys(auth)
+    hasMasterKey: !!(auth && auth.masterKey),
+    isNew: !auth
   }
 }
 
@@ -838,7 +825,7 @@ async function enrollFingerprint(existingMasterKey) {
     })
 
     const auth = await getAuth() || {}
-
+    
     if (!auth.fingerprintSalt) {
       auth.fingerprintSalt = Array.from(await generateSalt())
     }
@@ -847,17 +834,15 @@ async function enrollFingerprint(existingMasterKey) {
     const wrappingKey = await deriveKeyFromSecret(FINGERPRINT_SECRET, salt)
 
     let masterKeyBytes
-    let isNewVault = false
-
     if (existingMasterKey) {
       masterKeyBytes = existingMasterKey instanceof CryptoKey
         ? new Uint8Array(await crypto.subtle.exportKey('raw', existingMasterKey))
         : new Uint8Array(existingMasterKey)
-    } else if (hasWrappedKeys(auth)) {
-      return { success: false, error: 'Vault exists. Unlock first to add fingerprint.' }
+    } else if (auth.masterKey) {
+      masterKeyBytes = new Uint8Array(auth.masterKey)
     } else {
       masterKeyBytes = await generateMasterKey()
-      isNewVault = true
+      auth.masterKey = Array.from(masterKeyBytes)
     }
 
     const wrappedForFingerprint = await wrapMasterKey(masterKeyBytes, wrappingKey)
@@ -869,7 +854,7 @@ async function enrollFingerprint(existingMasterKey) {
     const masterKey = await masterKeyToCryptoKey(masterKeyBytes)
 
     cancelCreationTimer('fingerprint')
-    return { success: true, masterKey, isNewVault }
+    return { success: true, masterKey }
   } catch (error) {
     return { success: false, error: error.message }
   }
@@ -906,8 +891,6 @@ async function authenticateFingerprint() {
     const unwrappingKey = await deriveKeyFromSecret(FINGERPRINT_SECRET, salt)
 
     const masterKey = await unwrapMasterKey(auth.fingerprintWrappedKey, unwrappingKey)
-
-    await migrateLegacyMasterKey()
 
     clearAttempts('fingerprint')
     return { success: true, masterKey }
@@ -947,10 +930,11 @@ async function setPIN(pin, existingMasterKey) {
     masterKeyBytes = existingMasterKey instanceof CryptoKey
       ? new Uint8Array(await crypto.subtle.exportKey('raw', existingMasterKey))
       : new Uint8Array(existingMasterKey)
-  } else if (hasWrappedKeys(auth)) {
-    return { success: false, error: 'Vault exists. Unlock first to add PIN.' }
+  } else if (auth.masterKey) {
+    masterKeyBytes = new Uint8Array(auth.masterKey)
   } else {
     masterKeyBytes = await generateMasterKey()
+    auth.masterKey = Array.from(masterKeyBytes)
     isNewVault = true
   }
 
@@ -995,10 +979,11 @@ async function setPassword(password, existingMasterKey) {
     masterKeyBytes = existingMasterKey instanceof CryptoKey
       ? new Uint8Array(await crypto.subtle.exportKey('raw', existingMasterKey))
       : new Uint8Array(existingMasterKey)
-  } else if (hasWrappedKeys(auth)) {
-    return { success: false, error: 'Vault exists. Unlock first to add password.' }
+  } else if (auth.masterKey) {
+    masterKeyBytes = new Uint8Array(auth.masterKey)
   } else {
     masterKeyBytes = await generateMasterKey()
+    auth.masterKey = Array.from(masterKeyBytes)
     isNewVault = true
   }
 
@@ -1036,8 +1021,6 @@ async function authenticatePIN(pin) {
     const unwrappingKey = await deriveKeyFromSecret(pin, salt)
     const masterKey = await unwrapMasterKey(auth.pinWrappedKey, unwrappingKey)
 
-    await migrateLegacyMasterKey()
-
     clearAttempts('pin')
     return { success: true, masterKey }
   } catch (error) {
@@ -1068,8 +1051,6 @@ async function authenticatePassword(password) {
   try {
     const unwrappingKey = await deriveKeyFromSecret(password, salt)
     const masterKey = await unwrapMasterKey(auth.passwordWrappedKey, unwrappingKey)
-
-    await migrateLegacyMasterKey()
 
     clearAttempts('password')
     return { success: true, masterKey }
@@ -1150,9 +1131,7 @@ const { createBackupSignature, verifyBackupSignature } = cryptoModule
 const PAIRING_TIMEOUT = 60000
 
 function generatePairingCode() {
-  const array = new Uint32Array(1)
-  crypto.getRandomValues(array)
-  const code = 1000 + (array[0] % 9000)
+  const code = Math.floor(1000 + Math.random() * 9000)
   return code.toString()
 }
 
@@ -1189,7 +1168,7 @@ async function deriveSharedKey(privateKey, publicKeyRaw) {
     privateKey,
     { name: 'AES-GCM', length: 256 },
     true,
-    ['encrypt', 'decrypt', 'wrapKey', 'unwrapKey']
+    ['encrypt', 'decrypt']
   )
 }
 
@@ -1283,57 +1262,9 @@ function parseResponse(responseData) {
   }
 }
 
-async function wrapMasterKeyForTransfer(masterKey, sharedKey) {
-  const iv = crypto.getRandomValues(new Uint8Array(12))
-
-  let keyToWrap = masterKey
-  if (!(masterKey instanceof CryptoKey)) {
-    keyToWrap = await crypto.subtle.importKey(
-      'raw',
-      new Uint8Array(masterKey),
-      { name: 'AES-GCM', length: 256 },
-      true,
-      ['encrypt', 'decrypt']
-    )
-  }
-
-  const wrapped = await crypto.subtle.wrapKey(
-    'raw',
-    keyToWrap,
-    sharedKey,
-    { name: 'AES-GCM', iv }
-  )
-
-  return {
-    wrapped: Array.from(new Uint8Array(wrapped)),
-    iv: Array.from(iv)
-  }
-}
-
-async function unwrapMasterKeyFromTransfer(wrappedData, sharedKey) {
-  const masterKey = await crypto.subtle.unwrapKey(
-    'raw',
-    new Uint8Array(wrappedData.wrapped),
-    sharedKey,
-    { name: 'AES-GCM', iv: new Uint8Array(wrappedData.iv) },
-    { name: 'AES-GCM', length: 256 },
-    true,
-    ['encrypt', 'decrypt']
-  )
-
-  return masterKey
-}
-
-async function prepareTransfer(masterKey, sharedKey) {
-  if (!masterKey) {
-    return { success: false, error: 'Unlock vault first to transfer' }
-  }
-
-  if (!sharedKey) {
-    return { success: false, error: 'Complete pairing first' }
-  }
-
+async function prepareTransfer(masterKey) {
   const vault = await getPasswordVault()
+  const auth = await getAuth()
 
   if (!vault) {
     return { success: false, error: 'No vault to transfer' }
@@ -1341,30 +1272,34 @@ async function prepareTransfer(masterKey, sharedKey) {
 
   const passwordCount = Object.values(vault.credentials || {}).flat().length
 
-  const wrappedMasterKey = await wrapMasterKeyForTransfer(masterKey, sharedKey)
-
-  const payloadObj = {
-    version: 2,
+  const payload = JSON.stringify({
+    version: 1,
     createdAt: Date.now(),
     passwordCount,
     vault: vault,
-    wrappedMasterKey: wrappedMasterKey
-  }
+    auth: {
+      masterKey: auth.masterKey,
+      fingerprintSalt: auth.fingerprintSalt || null,
+      fingerprintEnabled: auth.fingerprintEnabled || false,
+      fingerprintWrappedKey: auth.fingerprintWrappedKey || null,
+      pinSalt: auth.pinSalt || null,
+      pinHash: auth.pinHash || null,
+      pinWrappedKey: auth.pinWrappedKey || null,
+      passwordSalt: auth.passwordSalt || null,
+      passwordHash: auth.passwordHash || null,
+      passwordWrappedKey: auth.passwordWrappedKey || null
+    }
+  })
 
-  const payload = JSON.stringify(payloadObj)
+  const masterKeyForSig = await crypto.subtle.importKey(
+    'raw',
+    new Uint8Array(auth.masterKey),
+    { name: 'AES-GCM', length: 256 },
+    false,
+    ['encrypt', 'decrypt']
+  )
 
-  let signingKey = masterKey
-  if (!(masterKey instanceof CryptoKey)) {
-    signingKey = await crypto.subtle.importKey(
-      'raw',
-      new Uint8Array(masterKey),
-      { name: 'AES-GCM', length: 256 },
-      false,
-      ['encrypt', 'decrypt']
-    )
-  }
-
-  const signature = await createBackupSignature(payload, signingKey)
+  const signature = await createBackupSignature(payload, masterKeyForSig)
 
   return {
     success: true,
@@ -1407,19 +1342,16 @@ async function decryptTransfer(encrypted, sharedKey) {
   return JSON.parse(decoder.decode(plaintext))
 }
 
-async function verifyTransfer(transferData, masterKey) {
-  let verifyKey = masterKey
-  if (!(masterKey instanceof CryptoKey)) {
-    verifyKey = await crypto.subtle.importKey(
-      'raw',
-      new Uint8Array(masterKey),
-      { name: 'AES-GCM', length: 256 },
-      false,
-      ['encrypt', 'decrypt']
-    )
-  }
+async function verifyTransfer(transferData, masterKeyBytes) {
+  const masterKey = await crypto.subtle.importKey(
+    'raw',
+    new Uint8Array(masterKeyBytes),
+    { name: 'AES-GCM', length: 256 },
+    false,
+    ['encrypt', 'decrypt']
+  )
 
-  const valid = await verifyBackupSignature(transferData.payload, transferData.signature, verifyKey)
+  const valid = await verifyBackupSignature(transferData.payload, transferData.signature, masterKey)
 
   if (!valid) {
     return { valid: false, error: 'Backup corrupted or tampered' }
@@ -1433,20 +1365,10 @@ async function verifyTransfer(transferData, masterKey) {
   }
 }
 
-async function receiveTransfer(transferData, sharedKey) {
-  if (!sharedKey) {
-    return { success: false, error: 'Pairing key required' }
-  }
-
+async function receiveTransfer(transferData) {
   const data = JSON.parse(transferData.payload)
 
-  if (data.version !== 2 || !data.wrappedMasterKey) {
-    return { success: false, error: 'Incompatible transfer format' }
-  }
-
-  const masterKey = await unwrapMasterKeyFromTransfer(data.wrappedMasterKey, sharedKey)
-
-  const verification = await verifyTransfer(transferData, masterKey)
+  const verification = await verifyTransfer(transferData, data.auth.masterKey)
   if (!verification.valid) {
     return { success: false, error: verification.error }
   }
@@ -1455,13 +1377,33 @@ async function receiveTransfer(transferData, sharedKey) {
   vault.meta.lastAccess = Date.now()
   await setPasswordVault(vault)
 
+  await setAuth({
+    masterKey: data.auth.masterKey,
+    fingerprintSalt: data.auth.fingerprintSalt,
+    fingerprintEnabled: data.auth.fingerprintEnabled,
+    fingerprintWrappedKey: data.auth.fingerprintWrappedKey,
+    pinSalt: data.auth.pinSalt,
+    pinHash: data.auth.pinHash,
+    pinWrappedKey: data.auth.pinWrappedKey,
+    passwordSalt: data.auth.passwordSalt,
+    passwordHash: data.auth.passwordHash,
+    passwordWrappedKey: data.auth.passwordWrappedKey
+  })
+
+  const masterKey = await crypto.subtle.importKey(
+    'raw',
+    new Uint8Array(data.auth.masterKey),
+    { name: 'AES-GCM', length: 256 },
+    true,
+    ['encrypt', 'decrypt']
+  )
+
   return {
     success: true,
     masterKey,
     imported: {
       passwordCount: verification.passwordCount
-    },
-    requiresAuthSetup: true
+    }
   }
 }
 
