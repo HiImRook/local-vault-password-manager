@@ -94,12 +94,13 @@ async function setWalletVault(vaultData) {
 async function clearAll() {
   const database = await openDB()
   const stores = ['auth', 'passwords', 'wallets']
-  
-  for (const storeName of stores) {
+
+  await Promise.all(stores.map(storeName => new Promise((resolve, reject) => {
     const tx = database.transaction(storeName, 'readwrite')
-    const store = tx.objectStore(storeName)
-    store.clear()
-  }
+    tx.objectStore(storeName).clear()
+    tx.oncomplete = () => resolve()
+    tx.onerror = () => reject(tx.error)
+  })))
 }
 
 export {

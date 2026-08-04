@@ -1,19 +1,20 @@
 import {
+  PBKDF2_ITERATIONS,
+  LEGACY_PBKDF2_ITERATIONS,
   generateSalt,
   generateMasterKey,
   deriveKeyFromSecret,
+  deriveKeyFromPrfOutput,
   masterKeyToCryptoKey,
   wrapMasterKey,
-  unwrapMasterKey,
-  hashPin,
-  hashPassword,
-  arraysEqual
+  unwrapMasterKey
 } from './crypto.js'
 import { getAuth, setAuth } from './store.js'
 
-const RP_NAME = 'Valid Vault'
+const RP_NAME = 'Local Vault'
 const RP_ID = location.hostname
-const FINGERPRINT_SECRET = 'valid-vault-fingerprint-auth-v1'
+const PRF_INFO = 'valid-vault-prf-wrap-v2'
+const LEGACY_FINGERPRINT_SECRET = 'valid-vault-fingerprint-auth-v1'
 
 const attempts = new Map()
 const LOCKOUT_MS = 60000
@@ -79,7 +80,18 @@ function cancelCreationTimer(type) {
 
 function hasWrappedKeys(auth) {
   if (!auth) return false
-  return !!(auth.fingerprintWrappedKey || auth.pinWrappedKey || auth.passwordWrappedKey)
+  return !!(auth.fingerprintWrappedKey || auth.passwordWrappedKey || auth.pinWrappedKey)
+}
+
+async function purgeLegacyPin() {
+  const auth = await getAuth()
+  if (auth && (auth.pinWrappedKey || auth.pinSalt || auth.pinHash || auth.pinKdfIterations)) {
+    delete auth.pinWrappedKey
+    delete auth.pinSalt
+    delete auth.pinHash
+    delete auth.pinKdfIterations
+    await setAuth(auth)
+  }
 }
 
 async function migrateLegacyMasterKey() {
@@ -90,15 +102,61 @@ async function migrateLegacyMasterKey() {
   }
 }
 
+async function resolveMasterKeyBytes(existingMasterKey, auth) {
+  if (existingMasterKey) {
+    const bytes = existingMasterKey instanceof CryptoKey
+      ? new Uint8Array(await crypto.subtle.exportKey('raw', existingMasterKey))
+      : new Uint8Array(existingMasterKey)
+    return { bytes, isNewVault: false }
+  }
+  if (hasWrappedKeys(auth)) {
+    return { error: true }
+  }
+  return { bytes: await generateMasterKey(), isNewVault: true }
+}
+
+async function upgradeWrap(auth, method, secret, masterKey) {
+  const iterations = auth[method + 'KdfIterations'] || 0
+  if (iterations >= PBKDF2_ITERATIONS && !auth[method + 'Hash']) return
+
+  const salt = await generateSalt()
+  const wrappingKey = await deriveKeyFromSecret(secret, salt)
+  const masterKeyBytes = new Uint8Array(await crypto.subtle.exportKey('raw', masterKey))
+
+  auth[method + 'WrappedKey'] = await wrapMasterKey(masterKeyBytes, wrappingKey)
+  auth[method + 'Salt'] = Array.from(salt)
+  auth[method + 'KdfIterations'] = PBKDF2_ITERATIONS
+  delete auth[method + 'Hash']
+
+  await setAuth(auth)
+}
+
 async function initAuth() {
   const auth = await getAuth()
   return {
-    hasFingerprint: !!(auth && auth.fingerprintEnabled),
-    hasPIN: !!(auth && auth.pinHash),
-    hasPassword: !!(auth && auth.passwordHash),
+    hasFingerprint: !!(auth && auth.fingerprintEnabled && auth.fingerprintWrappedKey),
+    hasPassword: !!(auth && auth.passwordWrappedKey),
+    hasLegacyPIN: !!(auth && auth.pinWrappedKey),
     hasVault: hasWrappedKeys(auth),
     isNew: !auth || !hasWrappedKeys(auth)
   }
+}
+
+async function evaluatePrf(credentialId, prfSalt) {
+  const assertion = await navigator.credentials.get({
+    publicKey: {
+      challenge: crypto.getRandomValues(new Uint8Array(32)),
+      rpId: RP_ID,
+      allowCredentials: [{ id: credentialId, type: 'public-key' }],
+      userVerification: 'required',
+      extensions: { prf: { eval: { first: prfSalt } } },
+      timeout: 60000
+    }
+  })
+
+  const results = assertion.getClientExtensionResults()
+  if (!results.prf || !results.prf.results || !results.prf.results.first) return null
+  return new Uint8Array(results.prf.results.first)
 }
 
 function startFingerprintEnrollment() {
@@ -112,15 +170,20 @@ async function enrollFingerprint(existingMasterKey) {
   }
 
   try {
-    const challenge = crypto.getRandomValues(new Uint8Array(32))
-    const userId = new TextEncoder().encode('valid-vault-user')
+    const auth = await getAuth() || {}
+
+    if (!existingMasterKey && hasWrappedKeys(auth)) {
+      return { success: false, error: 'Vault exists. Unlock first to add fingerprint.' }
+    }
+
+    const prfSalt = crypto.getRandomValues(new Uint8Array(32))
 
     const credential = await navigator.credentials.create({
       publicKey: {
-        challenge: challenge,
+        challenge: crypto.getRandomValues(new Uint8Array(32)),
         rp: { name: RP_NAME, id: RP_ID },
         user: {
-          id: userId,
+          id: new TextEncoder().encode('valid-vault-user'),
           name: 'vault-user',
           displayName: 'Vault User'
         },
@@ -133,46 +196,76 @@ async function enrollFingerprint(existingMasterKey) {
           userVerification: 'required',
           residentKey: 'preferred'
         },
+        extensions: { prf: { eval: { first: prfSalt } } },
         timeout: 60000
       }
     })
 
-    const auth = await getAuth() || {}
+    const created = credential.getClientExtensionResults()
+    const prfAtCreate = created.prf && created.prf.results && created.prf.results.first
+    const prfEnabled = created.prf && created.prf.enabled
 
-    if (!auth.fingerprintSalt) {
-      auth.fingerprintSalt = Array.from(await generateSalt())
+    if (!prfAtCreate && !prfEnabled) {
+      return { success: false, error: 'This device cannot bind keys to biometrics. Use PIN or password instead.' }
     }
 
-    const salt = new Uint8Array(auth.fingerprintSalt)
-    const wrappingKey = await deriveKeyFromSecret(FINGERPRINT_SECRET, salt)
+    const credentialId = new Uint8Array(credential.rawId)
 
-    let masterKeyBytes
-    let isNewVault = false
+    const prfOutput = prfAtCreate
+      ? new Uint8Array(created.prf.results.first)
+      : await evaluatePrf(credentialId, prfSalt)
 
-    if (existingMasterKey) {
-      masterKeyBytes = existingMasterKey instanceof CryptoKey
-        ? new Uint8Array(await crypto.subtle.exportKey('raw', existingMasterKey))
-        : new Uint8Array(existingMasterKey)
-    } else if (hasWrappedKeys(auth)) {
+    if (!prfOutput) {
+      return { success: false, error: 'PRF evaluation failed' }
+    }
+
+    const wrappingKey = await deriveKeyFromPrfOutput(prfOutput, PRF_INFO)
+
+    const resolved = await resolveMasterKeyBytes(existingMasterKey, auth)
+    if (resolved.error) {
       return { success: false, error: 'Vault exists. Unlock first to add fingerprint.' }
-    } else {
-      masterKeyBytes = await generateMasterKey()
-      isNewVault = true
     }
 
-    const wrappedForFingerprint = await wrapMasterKey(masterKeyBytes, wrappingKey)
-    auth.fingerprintWrappedKey = wrappedForFingerprint
+    auth.fingerprintWrappedKey = await wrapMasterKey(resolved.bytes, wrappingKey)
+    auth.fingerprintCredentialId = Array.from(credentialId)
+    auth.fingerprintPrfSalt = Array.from(prfSalt)
     auth.fingerprintEnabled = true
+    delete auth.fingerprintSalt
 
     await setAuth(auth)
 
-    const masterKey = await masterKeyToCryptoKey(masterKeyBytes)
+    const masterKey = await masterKeyToCryptoKey(resolved.bytes)
 
     cancelCreationTimer('fingerprint')
-    return { success: true, masterKey, isNewVault }
+    return { success: true, masterKey, isNewVault: resolved.isNewVault }
   } catch (error) {
     return { success: false, error: error.message }
   }
+}
+
+async function authenticateLegacyFingerprint(auth) {
+  await navigator.credentials.get({
+    publicKey: {
+      challenge: crypto.getRandomValues(new Uint8Array(32)),
+      rpId: RP_ID,
+      userVerification: 'required',
+      timeout: 60000
+    }
+  })
+
+  const salt = new Uint8Array(auth.fingerprintSalt)
+  const unwrappingKey = await deriveKeyFromSecret(LEGACY_FINGERPRINT_SECRET, salt, LEGACY_PBKDF2_ITERATIONS)
+  const masterKey = await unwrapMasterKey(auth.fingerprintWrappedKey, unwrappingKey)
+
+  delete auth.fingerprintEnabled
+  delete auth.fingerprintWrappedKey
+  delete auth.fingerprintSalt
+  await setAuth(auth)
+
+  await migrateLegacyMasterKey()
+
+  clearAttempts('fingerprint')
+  return { success: true, masterKey, requiresReenroll: true }
 }
 
 async function authenticateFingerprint() {
@@ -191,22 +284,23 @@ async function authenticateFingerprint() {
       return { success: false, error: 'Fingerprint not configured properly' }
     }
 
-    const challenge = crypto.getRandomValues(new Uint8Array(32))
+    if (!auth.fingerprintCredentialId) {
+      return await authenticateLegacyFingerprint(auth)
+    }
 
-    await navigator.credentials.get({
-      publicKey: {
-        challenge: challenge,
-        rpId: RP_ID,
-        userVerification: 'required',
-        timeout: 60000
-      }
-    })
+    const credentialId = new Uint8Array(auth.fingerprintCredentialId)
+    const prfSalt = new Uint8Array(auth.fingerprintPrfSalt)
 
-    const salt = new Uint8Array(auth.fingerprintSalt)
-    const unwrappingKey = await deriveKeyFromSecret(FINGERPRINT_SECRET, salt)
+    const prfOutput = await evaluatePrf(credentialId, prfSalt)
+    if (!prfOutput) {
+      recordFailedAttempt('fingerprint')
+      return { success: false, error: 'PRF evaluation failed' }
+    }
 
+    const unwrappingKey = await deriveKeyFromPrfOutput(prfOutput, PRF_INFO)
     const masterKey = await unwrapMasterKey(auth.fingerprintWrappedKey, unwrappingKey)
 
+    await purgeLegacyPin()
     await migrateLegacyMasterKey()
 
     clearAttempts('fingerprint')
@@ -215,54 +309,6 @@ async function authenticateFingerprint() {
     recordFailedAttempt('fingerprint')
     return { success: false, error: error.message }
   }
-}
-
-function startPINCreation() {
-  return startCreationTimer('pin')
-}
-
-async function setPIN(pin, existingMasterKey) {
-  const timerCheck = checkCreationTimer('pin')
-  if (!timerCheck.valid) {
-    return { success: false, error: timerCheck.error }
-  }
-
-  if (pin.length < 4 || pin.length > 6 || !/^\d+$/.test(pin)) {
-    return { success: false, error: 'PIN must be 4-6 digits' }
-  }
-
-  const auth = await getAuth() || {}
-  const salt = auth.pinSalt ? new Uint8Array(auth.pinSalt) : await generateSalt()
-  const hash = await hashPin(pin, salt)
-
-  auth.pinHash = hash
-  auth.pinSalt = Array.from(salt)
-
-  const wrappingKey = await deriveKeyFromSecret(pin, salt)
-
-  let masterKeyBytes
-  let isNewVault = false
-
-  if (existingMasterKey) {
-    masterKeyBytes = existingMasterKey instanceof CryptoKey
-      ? new Uint8Array(await crypto.subtle.exportKey('raw', existingMasterKey))
-      : new Uint8Array(existingMasterKey)
-  } else if (hasWrappedKeys(auth)) {
-    return { success: false, error: 'Vault exists. Unlock first to add PIN.' }
-  } else {
-    masterKeyBytes = await generateMasterKey()
-    isNewVault = true
-  }
-
-  const wrappedForPIN = await wrapMasterKey(masterKeyBytes, wrappingKey)
-  auth.pinWrappedKey = wrappedForPIN
-
-  await setAuth(auth)
-
-  cancelCreationTimer('pin')
-
-  const masterKey = await masterKeyToCryptoKey(masterKeyBytes)
-  return { success: true, masterKey, isNewVault }
 }
 
 function startPasswordCreation() {
@@ -280,70 +326,25 @@ async function setPassword(password, existingMasterKey) {
   }
 
   const auth = await getAuth() || {}
-  const salt = auth.passwordSalt ? new Uint8Array(auth.passwordSalt) : await generateSalt()
-  const hash = await hashPassword(password, salt)
-
-  auth.passwordHash = hash
-  auth.passwordSalt = Array.from(salt)
-
-  const wrappingKey = await deriveKeyFromSecret(password, salt)
-
-  let masterKeyBytes
-  let isNewVault = false
-
-  if (existingMasterKey) {
-    masterKeyBytes = existingMasterKey instanceof CryptoKey
-      ? new Uint8Array(await crypto.subtle.exportKey('raw', existingMasterKey))
-      : new Uint8Array(existingMasterKey)
-  } else if (hasWrappedKeys(auth)) {
+  const resolved = await resolveMasterKeyBytes(existingMasterKey, auth)
+  if (resolved.error) {
     return { success: false, error: 'Vault exists. Unlock first to add password.' }
-  } else {
-    masterKeyBytes = await generateMasterKey()
-    isNewVault = true
   }
 
-  const wrappedForPassword = await wrapMasterKey(masterKeyBytes, wrappingKey)
-  auth.passwordWrappedKey = wrappedForPassword
+  const salt = await generateSalt()
+  const wrappingKey = await deriveKeyFromSecret(password, salt)
+
+  auth.passwordWrappedKey = await wrapMasterKey(resolved.bytes, wrappingKey)
+  auth.passwordSalt = Array.from(salt)
+  auth.passwordKdfIterations = PBKDF2_ITERATIONS
+  delete auth.passwordHash
 
   await setAuth(auth)
 
   cancelCreationTimer('password')
 
-  const masterKey = await masterKeyToCryptoKey(masterKeyBytes)
-  return { success: true, masterKey, isNewVault }
-}
-
-async function authenticatePIN(pin) {
-  const rateCheck = checkRateLimit('pin')
-  if (!rateCheck.allowed) {
-    return { success: false, error: `Too many attempts. Wait ${rateCheck.remaining}s` }
-  }
-
-  const auth = await getAuth()
-  if (!auth || !auth.pinHash) {
-    return { success: false, error: 'No PIN set' }
-  }
-
-  const salt = new Uint8Array(auth.pinSalt)
-  const hash = await hashPin(pin, salt)
-
-  if (!arraysEqual(hash, auth.pinHash)) {
-    recordFailedAttempt('pin')
-    return { success: false, error: 'Invalid PIN' }
-  }
-
-  try {
-    const unwrappingKey = await deriveKeyFromSecret(pin, salt)
-    const masterKey = await unwrapMasterKey(auth.pinWrappedKey, unwrappingKey)
-
-    await migrateLegacyMasterKey()
-
-    clearAttempts('pin')
-    return { success: true, masterKey }
-  } catch (error) {
-    recordFailedAttempt('pin')
-    return { success: false, error: 'Decryption failed' }
-  }
+  const masterKey = await masterKeyToCryptoKey(resolved.bytes)
+  return { success: true, masterKey, isNewVault: resolved.isNewVault }
 }
 
 async function authenticatePassword(password) {
@@ -353,29 +354,54 @@ async function authenticatePassword(password) {
   }
 
   const auth = await getAuth()
-  if (!auth || !auth.passwordHash) {
+  if (!auth || !auth.passwordWrappedKey) {
     return { success: false, error: 'No password set' }
   }
 
-  const salt = new Uint8Array(auth.passwordSalt)
-  const hash = await hashPassword(password, salt)
-
-  if (!arraysEqual(hash, auth.passwordHash)) {
-    recordFailedAttempt('password')
-    return { success: false, error: 'Invalid password' }
-  }
-
   try {
-    const unwrappingKey = await deriveKeyFromSecret(password, salt)
+    const salt = new Uint8Array(auth.passwordSalt)
+    const iterations = auth.passwordKdfIterations || LEGACY_PBKDF2_ITERATIONS
+    const unwrappingKey = await deriveKeyFromSecret(password, salt, iterations)
     const masterKey = await unwrapMasterKey(auth.passwordWrappedKey, unwrappingKey)
 
+    await upgradeWrap(auth, 'password', password, masterKey)
+    await purgeLegacyPin()
     await migrateLegacyMasterKey()
 
     clearAttempts('password')
     return { success: true, masterKey }
   } catch (error) {
     recordFailedAttempt('password')
-    return { success: false, error: 'Decryption failed' }
+    return { success: false, error: 'Invalid password' }
+  }
+}
+
+async function authenticateLegacyPIN(pin) {
+  const rateCheck = checkRateLimit('pin')
+  if (!rateCheck.allowed) {
+    return { success: false, error: `Too many attempts. Wait ${rateCheck.remaining}s` }
+  }
+
+  const auth = await getAuth()
+  if (!auth || !auth.pinWrappedKey) {
+    return { success: false, error: 'No legacy PIN vault to migrate' }
+  }
+
+  try {
+    const salt = new Uint8Array(auth.pinSalt)
+    const iterations = auth.pinKdfIterations || LEGACY_PBKDF2_ITERATIONS
+    const unwrappingKey = await deriveKeyFromSecret(pin, salt, iterations)
+    const masterKey = await unwrapMasterKey(auth.pinWrappedKey, unwrappingKey)
+
+    await purgeLegacyPin()
+    await migrateLegacyMasterKey()
+
+    clearAttempts('pin')
+    const requiresAuthSetup = !auth.passwordWrappedKey && !auth.fingerprintWrappedKey
+    return { success: true, masterKey, requiresAuthSetup }
+  } catch (error) {
+    recordFailedAttempt('pin')
+    return { success: false, error: 'Invalid PIN' }
   }
 }
 
@@ -383,28 +409,15 @@ async function removeFingerprint() {
   const auth = await getAuth()
   if (!auth) return { success: false, error: 'No auth configured' }
 
-  if (!auth.pinHash && !auth.passwordHash) {
-    return { success: false, error: 'Cannot remove fingerprint without PIN or password backup' }
+  if (!auth.passwordWrappedKey) {
+    return { success: false, error: 'Cannot remove fingerprint without password backup' }
   }
 
   delete auth.fingerprintEnabled
   delete auth.fingerprintWrappedKey
-  await setAuth(auth)
-
-  return { success: true }
-}
-
-async function removePIN() {
-  const auth = await getAuth()
-  if (!auth) return { success: false, error: 'No auth configured' }
-
-  if (!auth.fingerprintEnabled && !auth.passwordHash) {
-    return { success: false, error: 'Cannot remove PIN without fingerprint or password backup' }
-  }
-
-  delete auth.pinHash
-  delete auth.pinSalt
-  delete auth.pinWrappedKey
+  delete auth.fingerprintCredentialId
+  delete auth.fingerprintPrfSalt
+  delete auth.fingerprintSalt
   await setAuth(auth)
 
   return { success: true }
@@ -414,13 +427,14 @@ async function removePassword() {
   const auth = await getAuth()
   if (!auth) return { success: false, error: 'No auth configured' }
 
-  if (!auth.fingerprintEnabled && !auth.pinHash) {
-    return { success: false, error: 'Cannot remove password without fingerprint or PIN backup' }
+  if (!auth.fingerprintEnabled) {
+    return { success: false, error: 'Cannot remove password without fingerprint backup' }
   }
 
-  delete auth.passwordHash
-  delete auth.passwordSalt
   delete auth.passwordWrappedKey
+  delete auth.passwordSalt
+  delete auth.passwordKdfIterations
+  delete auth.passwordHash
   await setAuth(auth)
 
   return { success: true }
@@ -431,14 +445,11 @@ export {
   startFingerprintEnrollment,
   enrollFingerprint,
   authenticateFingerprint,
-  startPINCreation,
-  setPIN,
   startPasswordCreation,
   setPassword,
-  authenticatePIN,
   authenticatePassword,
+  authenticateLegacyPIN,
   removeFingerprint,
-  removePIN,
   removePassword,
   checkRateLimit,
   checkCreationTimer

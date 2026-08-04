@@ -4,10 +4,13 @@ import { createBackupSignature, verifyBackupSignature } from './crypto.js'
 const PAIRING_TIMEOUT = 60000
 
 function generatePairingCode() {
+  const range = 9000
+  const limit = Math.floor(0x100000000 / range) * range
   const array = new Uint32Array(1)
-  crypto.getRandomValues(array)
-  const code = 1000 + (array[0] % 9000)
-  return code.toString()
+  do {
+    crypto.getRandomValues(array)
+  } while (array[0] >= limit)
+  return String(1000 + (array[0] % range))
 }
 
 function generateSessionId() {

@@ -27,18 +27,18 @@ const bundledJS = `
 const cryptoModule = (function() {
 ${crypto}
 return {
+  PBKDF2_ITERATIONS,
+  LEGACY_PBKDF2_ITERATIONS,
   generateSalt,
   generateIV,
   generateMasterKey,
   deriveKeyFromSecret,
+  deriveKeyFromPrfOutput,
   masterKeyToCryptoKey,
   wrapMasterKey,
   unwrapMasterKey,
   encrypt,
   decrypt,
-  hashPin,
-  hashPassword,
-  arraysEqual,
   createBackupSignature,
   verifyBackupSignature
 }
@@ -62,11 +62,24 @@ return {
 })();
 
 const sessionModule = (function() {
+const {
+  generateSalt,
+  deriveKeyFromSecret,
+  masterKeyToCryptoKey,
+  encrypt,
+  decrypt
+} = cryptoModule
 ${session}
 return {
   setMasterKey,
   getMasterKey,
   hasMasterKey,
+  setSessionPin,
+  clearSessionPin,
+  hasSessionPin,
+  isSoftLocked,
+  softLockNow,
+  resumeWithPin,
   unlockDomain,
   lockDomain,
   isDomainUnlocked,
@@ -95,15 +108,15 @@ return {
 
 const authModule = (function() {
 const {
+  PBKDF2_ITERATIONS,
+  LEGACY_PBKDF2_ITERATIONS,
   generateSalt,
   generateMasterKey,
   deriveKeyFromSecret,
+  deriveKeyFromPrfOutput,
   masterKeyToCryptoKey,
   wrapMasterKey,
-  unwrapMasterKey,
-  hashPin,
-  hashPassword,
-  arraysEqual
+  unwrapMasterKey
 } = cryptoModule
 const { getAuth, setAuth } = storeModule
 ${auth}
@@ -112,14 +125,11 @@ return {
   startFingerprintEnrollment,
   enrollFingerprint,
   authenticateFingerprint,
-  startPINCreation,
-  setPIN,
   startPasswordCreation,
   setPassword,
-  authenticatePIN,
   authenticatePassword,
+  authenticateLegacyPIN,
   removeFingerprint,
-  removePIN,
   removePassword,
   checkRateLimit,
   checkCreationTimer
@@ -193,7 +203,7 @@ window.onerror = function(msg, url, line) {
 }
 
 document.addEventListener('DOMContentLoaded', function() {
-  log('Valid Vault loaded')
+  log('Local Vault loaded')
   updateStatus()
 })
 
@@ -209,9 +219,11 @@ function log(msg, type) {
 async function updateStatus() {
   try {
     var status = await vault.auth.initAuth()
-    document.getElementById('fp-status').className = 'status ' + (status.hasFingerprint ? 'active' : 'inactive')
-    document.getElementById('pin-status').className = 'status ' + (status.hasPIN ? 'active' : 'inactive')
-    document.getElementById('pw-status').className = 'status ' + (status.hasPassword ? 'active' : 'inactive')
+    var state = vault.session.getState()
+    document.getElementById('status-fingerprint').className = 'status ' + (status.hasFingerprint ? 'active' : 'inactive')
+    document.getElementById('status-pin').className = 'status ' + (state.hasSessionPin ? 'active' : 'inactive')
+    document.getElementById('status-password').className = 'status ' + (status.hasPassword ? 'active' : 'inactive')
+    document.getElementById('status-session').className = 'status ' + (state.hasMasterKey ? 'active' : 'inactive')
     log('Status updated')
   } catch (e) {
     log('Status error: ' + e.message, 'error')
@@ -255,17 +267,18 @@ window.authFingerprint = async function() {
 }
 
 window.showSetPIN = function() {
-  vault.auth.startPINCreation()
-  showModal('<h3>Set PIN</h3><input type="text" id="modal-pin" placeholder="4-6 digits" maxlength="6"><div style="margin-top:16px;"><button onclick="confirmSetPIN()">Set PIN</button><button onclick="hideModal()" class="secondary">Cancel</button></div>')
+  if (!vault.session.hasMasterKey()) {
+    log('Unlock vault first to set a session PIN', 'error')
+    return
+  }
+  showModal('<h3>Set Session PIN</h3><p style="color:#666;font-size:13px;">Quick unlock for this session only. Clears when the app closes.</p><input type="text" id="modal-pin" placeholder="4-6 digits" maxlength="6"><div style="margin-top:16px;"><button onclick="confirmSetPIN()">Set PIN</button><button onclick="hideModal()" class="secondary">Cancel</button></div>')
 }
 
 window.confirmSetPIN = async function() {
   var pin = document.getElementById('modal-pin').value
-  var masterKey = vault.session.getMasterKey()
-  var result = await vault.auth.setPIN(pin, masterKey)
+  var result = await vault.session.setSessionPin(pin)
   if (result.success) {
-    log('PIN set', 'success')
-    vault.session.setMasterKey(result.masterKey)
+    log('Session PIN set. Clears when the app closes.', 'success')
   } else {
     log('Set PIN failed: ' + result.error, 'error')
   }
@@ -275,12 +288,29 @@ window.confirmSetPIN = async function() {
 
 window.authPIN = async function() {
   var pin = document.getElementById('pin-input').value
-  var result = await vault.auth.authenticatePIN(pin)
-  if (result.success) {
-    log('PIN auth success', 'success')
-    vault.session.setMasterKey(result.masterKey)
+  if (vault.session.isSoftLocked()) {
+    var result = await vault.session.resumeWithPin(pin)
+    if (result.success) {
+      log('Session resumed', 'success')
+    } else {
+      log(result.error, 'error')
+    }
   } else {
-    log('Auth failed: ' + result.error, 'error')
+    var status = await vault.auth.initAuth()
+    if (status.hasLegacyPIN) {
+      var result = await vault.auth.authenticateLegacyPIN(pin)
+      if (result.success) {
+        vault.session.setMasterKey(result.masterKey)
+        log('Legacy PIN vault migrated. PIN is now session-only.', 'success')
+        if (result.requiresAuthSetup) {
+          log('Set a password or fingerprint now. PIN can no longer open the vault after restart.', 'error')
+        }
+      } else {
+        log(result.error, 'error')
+      }
+    } else {
+      log('PIN resumes a locked session. Unlock with password or fingerprint first.', 'error')
+    }
   }
   updateStatus()
 }
