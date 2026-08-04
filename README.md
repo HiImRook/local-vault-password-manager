@@ -6,13 +6,13 @@ A local, encrypted, QR code portable password manager. No cloud, no accounts, or
 
 > ✅ **Security Overhaul Notice — v0.3.0**
 >
-> The key protection layer has been reworked. Fingerprint unlock is now cryptographically bound to the device authenticator via WebAuthn PRF. Stored verification hashes are gone — wrong credentials fail at the AES-GCM unwrap, so every offline guess pays the full key derivation cost. PBKDF2 raised to 600k iterations with silent migration on unlock. PIN no longer wraps the master key and never touches disk — it is an ephemeral session convenience that clears when the app closes. See [CHANGELOG.md](CHANGELOG.md) for full details.
+> The key protection layer has been reworked. Fingerprint unlock is now cryptographically bound to the device authenticator via WebAuthn PRF. Stored verification hashes are gone - wrong credentials fail at the AES-GCM unwrap, so every offline guess pays the full key derivation cost. PBKDF2 raised to 600k iterations with silent migration on unlock. PIN no longer wraps the master key and never touches disk - it is an ephemeral session convenience that clears when the app closes. See [CHANGELOG.md](CHANGELOG.md) for full details.
 
 ---
 
 ## What is Local Vault?
 
-Local Vault is a self-hosted password manager built on a master key wrap architecture. One random 256-bit master key encrypts your vault. That key is never stored raw — it is wrapped independently under each unlock method you enroll, and unwrapping it is the act of authentication itself.
+Local Vault is a self-hosted password manager built on a master key wrap architecture. One random 256-bit master key encrypts your vault. That key is never stored raw - it is wrapped independently under each unlock method you enroll, and unwrapping it is the act of authentication itself.
 
 **How unlock works:**
 - Password - wrapping key derived via PBKDF2-SHA256 at 600,000 iterations with a per-wrap salt
