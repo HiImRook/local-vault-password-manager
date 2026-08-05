@@ -1,0 +1,150 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <title>Local Vault - Manage</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: #0a0a0a; color: #e0e0e0; }
+    .container { display: flex; height: 100vh; }
+    .sidebar { width: 200px; background: #1a1a1a; border-right: 1px solid #333; }
+    .sidebar-tab { padding: 16px 20px; cursor: pointer; color: #888; border-left: 3px solid transparent; }
+    .sidebar-tab:hover { background: #222; }
+    .sidebar-tab.active { color: #00d4aa; border-left-color: #00d4aa; background: #111; }
+    .content { flex: 1; padding: 40px; overflow-y: auto; }
+    h1 { color: #00d4aa; font-size: 24px; margin-bottom: 24px; }
+    h2 { color: #888; font-size: 14px; text-transform: uppercase; margin: 32px 0 16px; }
+    .auth-methods { display: flex; gap: 16px; margin-bottom: 32px; }
+    .auth-card { background: #1a1a1a; border-radius: 8px; padding: 16px; flex: 1; }
+    .auth-card.active { border: 2px solid #00d4aa; }
+    .auth-title { color: #00d4aa; font-size: 16px; margin-bottom: 8px; }
+    .auth-status { color: #666; font-size: 12px; margin-bottom: 12px; }
+    .auth-actions { display: flex; gap: 8px; }
+    .credential-list { background: #1a1a1a; border-radius: 8px; }
+    .credential-item { display: flex; align-items: center; padding: 16px; border-bottom: 1px solid #2a2a2a; }
+    .credential-item:last-child { border-bottom: none; }
+    .credential-domain { color: #00d4aa; font-size: 14px; font-weight: 500; width: 200px; }
+    .credential-username { color: #888; font-size: 13px; flex: 1; }
+    .credential-password { color: #666; font-size: 13px; font-family: monospace; width: 150px; }
+    .credential-actions { display: flex; gap: 8px; }
+    button { background: #00d4aa; color: #000; border: none; padding: 8px 16px; border-radius: 6px; cursor: pointer; font-size: 12px; font-weight: 500; }
+    button:hover { background: #00b894; }
+    button.secondary { background: #333; color: #e0e0e0; }
+    button.danger { background: #e74c3c; color: #fff; }
+    button.small { padding: 6px 10px; font-size: 11px; }
+    .setting-row { background: #1a1a1a; padding: 16px; margin-bottom: 12px; border-radius: 8px; display: flex; justify-content: space-between; align-items: center; }
+    .setting-label { font-size: 14px; color: #e0e0e0; }
+    .setting-desc { font-size: 12px; color: #666; margin-top: 4px; }
+    .toggle { position: relative; width: 50px; height: 24px; background: #333; border-radius: 12px; cursor: pointer; }
+    .toggle.active { background: #00d4aa; }
+    .toggle-knob { position: absolute; width: 18px; height: 18px; background: #fff; border-radius: 50%; top: 3px; left: 3px; transition: 0.2s; }
+    .toggle.active .toggle-knob { left: 29px; }
+    .clear-vault-section { margin-top: 64px; padding: 24px; background: #2a1a1a; border: 2px solid #e74c3c; border-radius: 8px; }
+    .hidden { display: none !important; }
+    .msg { padding: 12px; margin: 16px 0; border-radius: 6px; font-size: 13px; }
+    .msg.success { background: #1a3a2a; color: #00d4aa; }
+    .msg.error { background: #3a1a1a; color: #e74c3c; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div class="sidebar">
+      <div class="sidebar-tab active" data-tab="manage">Manage</div>
+      <div class="sidebar-tab" data-tab="personal">Personal Info</div>
+      <div class="sidebar-tab" data-tab="settings">Settings</div>
+      <div class="sidebar-tab" data-tab="about">About</div>
+    </div>
+
+    <div class="content">
+      <div id="tab-manage">
+        <h1>Manage Vault</h1>
+
+        <h2>Auth Methods</h2>
+        <div class="auth-methods">
+          <div class="auth-card" id="card-fp">
+            <div class="auth-title">Fingerprint</div>
+            <div class="auth-status" id="status-fp">Not enrolled</div>
+            <div class="auth-actions">
+              <button class="small secondary" id="btn-edit-fp">Edit</button>
+              <button class="small danger" id="btn-del-fp">Delete</button>
+            </div>
+          </div>
+          <div class="auth-card" id="card-pin">
+            <div class="auth-title">PIN</div>
+            <div class="auth-status" id="status-pin">Not set</div>
+            <div class="auth-actions">
+              <button class="small secondary" id="btn-edit-pin">Edit</button>
+              <button class="small danger" id="btn-del-pin">Delete</button>
+            </div>
+          </div>
+          <div class="auth-card" id="card-pw">
+            <div class="auth-title">Password</div>
+            <div class="auth-status" id="status-pw">Not set</div>
+            <div class="auth-actions">
+              <button class="small secondary" id="btn-edit-pw">Edit</button>
+              <button class="small danger" id="btn-del-pw">Delete</button>
+            </div>
+          </div>
+        </div>
+
+        <h2>Website Credentials</h2>
+        <div class="credential-list" id="credentials-list"></div>
+        <div id="msg-manage" class="msg hidden"></div>
+      </div>
+
+      <div id="tab-personal" class="hidden">
+        <h1>Personal Info</h1>
+        <p style="color:#666;font-size:14px;">Coming soon: Store addresses, credit cards, IDs, and other personal information.</p>
+      </div>
+
+      <div id="tab-settings" class="hidden">
+        <h1>Settings</h1>
+
+        <div class="setting-row">
+          <div>
+            <div class="setting-label">Lock on popup close</div>
+            <div class="setting-desc">Automatically lock vault when extension popup closes</div>
+          </div>
+          <div class="toggle" id="toggle-lock-popup">
+            <div class="toggle-knob"></div>
+          </div>
+        </div>
+
+        <div class="setting-row">
+          <div>
+            <div class="setting-label">Auto-lock timeout</div>
+            <div class="setting-desc">Lock vault after inactivity (minutes)</div>
+          </div>
+          <input type="number" min="0" max="60" value="0" id="input-timeout" style="width:80px;padding:8px;background:#2a2a2a;border:1px solid #444;color:#e0e0e0;border-radius:6px;">
+        </div>
+
+        <div class="clear-vault-section">
+          <h2 style="color:#e74c3c;margin-top:0;">Clear Vault</h2>
+          <p style="color:#888;font-size:13px;line-height:1.6;margin-bottom:16px;">
+            This will permanently delete all stored credentials, auth methods, and settings. 
+            <strong style="color:#e74c3c;">This cannot be undone.</strong><br><br>
+            <strong>Recommendation:</strong> Back up your vault to another device using Secure Sync before clearing.
+          </p>
+          <div style="display:flex;gap:12px;">
+            <button class="secondary">Back up with Secure Sync</button>
+            <button class="danger" id="btn-clear-vault">Clear Vault</button>
+          </div>
+        </div>
+
+        <div id="msg-settings" class="msg hidden"></div>
+      </div>
+
+      <div id="tab-about" class="hidden">
+        <h1>About Local Vault</h1>
+        <p style="color:#888;font-size:14px;line-height:1.8;max-width:600px;">
+          <strong style="color:#00d4aa;">Local Vault Password Manager v0.2.0</strong><br><br>
+          A decentralized password manager with fingerprint authentication. All data stored locally with zero server communication.<br><br>
+          Built by Rook<br>
+          <a href="https://github.com/HiImRook/local-vault-password-manager" style="color:#00d4aa;">GitHub Repository</a>
+        </p>
+      </div>
+    </div>
+  </div>
+  <script src="manage.js" type="module"></script>
+</body>
+</html>

@@ -1,0 +1,127 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { width: 320px; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: #0a0a0a; color: #e0e0e0; }
+    .container { padding: 16px; }
+    .header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; }
+    .header-icon { width: 40px; height: 40px; display: flex; flex-direction: column; align-items: center; justify-content: center; cursor: pointer; font-size: 20px; }
+    .header-icon.lock { color: #00d4aa; }
+    .header-icon.expand { color: #888; }
+    .header-label { font-size: 9px; color: #666; margin-top: 2px; }
+    h1 { color: #00d4aa; font-size: 18px; text-align: center; flex: 1; }
+    .section { background: #1a1a1a; border-radius: 8px; padding: 12px; margin-bottom: 10px; }
+    .section-title { color: #888; font-size: 11px; text-transform: uppercase; margin-bottom: 8px; }
+    button { background: #00d4aa; color: #000; border: none; padding: 10px 16px; border-radius: 6px; cursor: pointer; font-size: 13px; width: 100%; margin: 4px 0; }
+    button:hover { background: #00b894; }
+    button.secondary { background: #333; color: #e0e0e0; }
+    button.small { padding: 6px 10px; font-size: 11px; width: auto; }
+    input { background: #2a2a2a; border: 1px solid #444; color: #e0e0e0; padding: 8px; border-radius: 6px; width: 100%; margin: 4px 0; font-size: 13px; }
+    .row { display: flex; gap: 6px; align-items: center; }
+    .row input { flex: 1; }
+    .status-bar { display: flex; gap: 6px; margin-bottom: 12px; justify-content: center; }
+    .status { padding: 4px 10px; border-radius: 10px; font-size: 10px; background: #333; color: #666; }
+    .status.active { background: #00d4aa; color: #000; }
+    .credential-item { background: #222; border-radius: 6px; padding: 10px; margin: 6px 0; }
+    .credential-domain { color: #00d4aa; font-size: 12px; font-weight: 500; }
+    .credential-user { color: #888; font-size: 11px; }
+    .credential-actions { display: flex; gap: 6px; margin-top: 8px; }
+    .hidden { display: none !important; }
+    .msg { font-size: 11px; color: #888; text-align: center; padding: 8px; }
+    .msg.error { color: #e74c3c; }
+    .msg.success { color: #00d4aa; }
+    p { font-size: 12px; color: #888; line-height: 1.4; margin-bottom: 8px; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    
+    <div id="view-setup" class="hidden">
+      <h1>Local Vault</h1>
+      <div class="status-bar">
+        <span class="status" id="setup-status-fp">FP</span>
+        <span class="status" id="setup-status-pin">PIN</span>
+        <span class="status" id="setup-status-pw">PW</span>
+      </div>
+      <div class="section">
+        <div class="section-title">SETUP VAULT</div>
+        <p>No vault found. Create one:</p>
+        <button id="btn-setup-fp">Setup with Fingerprint</button>
+        <button class="secondary small" id="btn-skip-fp">Skip (Optional)</button>
+        <div class="row" style="margin-top:8px;">
+          <input type="password" id="setup-pin" placeholder="Set PIN (4-6 digits)" maxlength="6">
+          <button class="small" id="btn-setup-pin">Set</button>
+        </div>
+        <div class="row">
+          <input type="password" id="setup-password" placeholder="Set Password (8+ chars)">
+          <button class="small" id="btn-setup-pw">Set</button>
+        </div>
+        <div id="msg-setup" class="msg"></div>
+      </div>
+    </div>
+
+    <div id="view-locked" class="hidden">
+      <h1>Local Vault</h1>
+      <div class="status-bar">
+        <span class="status" id="status-fp">FP</span>
+        <span class="status" id="status-pin">PIN</span>
+        <span class="status" id="status-pw">PW</span>
+      </div>
+      <div class="section">
+        <button id="btn-fingerprint">Unlock with Fingerprint</button>
+        <div class="row" style="margin-top:8px;">
+          <input type="password" id="input-pin" placeholder="PIN" maxlength="6">
+          <button class="small" id="btn-pin">Go</button>
+        </div>
+        <div class="row">
+          <input type="password" id="input-password" placeholder="Password">
+          <button class="small" id="btn-password">Go</button>
+        </div>
+      </div>
+      <div id="msg-locked" class="msg"></div>
+    </div>
+
+    <div id="view-unlocked" class="hidden">
+      <div class="header">
+        <div class="header-icon lock" id="btn-lock">
+          🔓
+          <div class="header-label">Lock</div>
+        </div>
+        <h1>Local Vault</h1>
+        <div class="header-icon expand" id="btn-expand">
+          ▭
+          <div class="header-label">Expand</div>
+        </div>
+      </div>
+      <div class="status-bar">
+        <span class="status active" id="status-session">Session</span>
+      </div>
+      <div class="section">
+        <div class="section-title">CURRENT SITE</div>
+        <div id="current-domain" style="color:#00d4aa;font-size:13px;margin-bottom:8px;">-</div>
+        <div id="credentials-list"></div>
+        <button class="secondary" id="btn-add">Add Credential</button>
+      </div>
+      <div id="msg-unlocked" class="msg"></div>
+    </div>
+
+    <div id="view-add" class="hidden">
+      <h1>Add Credential</h1>
+      <div class="section">
+        <input type="text" id="add-domain" placeholder="Domain">
+        <input type="text" id="add-username" placeholder="Username">
+        <input type="password" id="add-password" placeholder="Password">
+        <div class="row" style="margin-top:8px;">
+          <button id="btn-save">Save</button>
+          <button class="secondary" id="btn-cancel">Cancel</button>
+        </div>
+      </div>
+      <div id="msg-add" class="msg"></div>
+    </div>
+
+  </div>
+  <script src="popup.js" type="module"></script>
+</body>
+</html>
