@@ -5,6 +5,31 @@ All notable changes to Local Vault will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.1] - 2026-08-05
+
+### Added
+- extension/ — browser extension brought into the repo (settings page, autofill dropdown, toolbar popup, content script)
+- extension/background.js — service worker answering credential requests so the autofill dropdown populates whether or not the popup is open
+- Autofill dropdown renders on login fields and fills saved credentials for the current domain
+- Session key bridged to the worker via chrome.storage.session — memory only, cleared on browser close
+
+### Fixed
+- Autofill dropdown showed an empty box when the popup was closed — the worker now serves credentials independently
+- Extension carried the pre-0.3.0 crypto — now on the same secure core as the app (WebAuthn PRF, verify-by-unwrap, PBKDF2 600k)
+
+### Changed
+- Extension PIN, password, and fingerprint unlock rebuilt on the secure crypto core with no stored verification hashes
+- Extension version aligned to 0.3.1
+
+### In Progress
+- Settings and options page access from the popup — actively being built
+- Full autofill profile (name, address, email, phone) alongside credentials — actively being built
+- Save credentials during signup rather than manual entry — actively being built
+
+### Notes
+- Autofill detection currently wires on fields present at page load — dynamic-form coverage is part of the in-progress autofill work
+- App and extension now share one crypto and auth core
+
 ## [0.3.0] - 2026-08-04
 
 ### Fixed
