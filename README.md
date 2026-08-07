@@ -12,7 +12,7 @@ A local, encrypted, QR code portable password manager. No cloud, no accounts, or
 
 ## What is Local Vault?
 
-Local Vault is a self-hosted password manager built on a master key wrap architecture. One random 256-bit master key encrypts your vault. That key is never stored raw - it is wrapped independently under each unlock method you enroll, and unwrapping it is the act of authentication itself.
+Local Vault is a self-hosted password manager built on a master key wrap architecture. One random 256-bit master key encrypts your vault. That key is never stored raw, it's wrapped independently under each unlock method you enroll, and unwrapping it is the act of authentication itself.
 
 **How unlock works:**
 - Password - wrapping key derived via PBKDF2-SHA256 at 600,000 iterations with a per-wrap salt
