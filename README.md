@@ -4,7 +4,11 @@ A local, encrypted, QR code portable password manager. No cloud, no accounts, or
 
 ---
 
-> ✅ **Security Overhaul Notice — v0.3.0**
+> ✅ **Credential Sync Notice - v0.3.2**
+>
+> Paired devices now merge their stored credentials instead of overwriting each other. Within a site the username identifies the login, matching usernames resolve to the newest password, and different usernames stay as separate logins. Deletions propagate to both devices. The vault with the oldest creation time supplies the shared master key, which is internal and never shown. Unlock methods stay local to each device and never sync. See [CHANGELOG.md](CHANGELOG.md) for full details.
+
+> ✅ **Security Overhaul Notice - v0.3.0**
 >
 > The key protection layer has been reworked. Fingerprint unlock is now cryptographically bound to the device authenticator via WebAuthn PRF. Stored verification hashes are gone - wrong credentials fail at the AES-GCM unwrap, so every offline guess pays the full key derivation cost. PBKDF2 raised to 600k iterations with silent migration on unlock. PIN no longer wraps the master key and never touches disk - it is an ephemeral session convenience that clears when the app closes. See [CHANGELOG.md](CHANGELOG.md) for full details.
 
@@ -20,7 +24,7 @@ Local Vault is a self-hosted password manager built on a master key wrap archite
 - Session PIN - ephemeral quick unlock for the current session only, held in memory, gone on app close
 - Wrong credential means the AES-GCM unwrap fails. There is no stored hash to attack, no shortcut, no oracle.
 
-No cloud service holds your data. No company can be subpoenaed for it, breached for it, or shut down out from under it. You cannot leak what you never sent anywhere.
+No cloud service holds your data. No company can be subpoenaed for it, breached for it, and there is never any data for anyone to sell. You cannot leak what you never sent anywhere.
 
 ---
 
@@ -44,6 +48,13 @@ No cloud service holds your data. No company can be subpoenaed for it, breached 
 - IndexedDB persistence - no external database or server
 - Session timeout with automatic lock
 
+**Credential Sync:**
+- Devices merge credentials on sync, they do not overwrite each other
+- Username is the identity within a site, newest password wins, different usernames coexist
+- Deletions propagate to both devices through tombstones
+- Oldest creation time supplies the shared master key, other devices re-encrypt under it
+- Unlock methods stay local to each device and never sync
+
 **Device Transfer:**
 - ECDH pairing over QR code - ephemeral keys per session
 - Numeric comparison code - short authentication string against MITM
@@ -55,7 +66,7 @@ No cloud service holds your data. No company can be subpoenaed for it, breached 
 - Android via Capacitor
 - Zero runtime dependencies beyond WebCrypto and IndexedDB
 
-## Current Status: v0.3.0
+## Current Status: v0.3.2
 
 **Completed:**
 * ✅ Master key wrap architecture - one random 256-bit key, wrapped per method
@@ -76,8 +87,14 @@ No cloud service holds your data. No company can be subpoenaed for it, breached 
 * ✅ Pairing code generation free of modulo bias
 * ✅ clearAll commits transactions before returning
 * ✅ Crypto flows validated in Node against WebCrypto
+* ✅ Credential merge engine - username-keyed, newest password wins, different usernames coexist
+* ✅ Oldest-key-wins shared master key with re-encryption on adopt
+* ✅ Tombstone deletes that propagate across devices
+* ✅ Browser extension shares the same merge engine as the app
 
 **In Development:**
+* 📋 QR pairing UI on both the app and extension so a user can start a sync
+* 📋 Comparison code confirmation screen during pairing
 * 📋 Vault blob encryption - domain names currently plaintext object keys
 * 📋 On-device PRF validation across Capacitor WebView versions
 
@@ -97,30 +114,56 @@ No cloud service holds your data. No company can be subpoenaed for it, breached 
 - Ephemeral session-only PIN
 - Rebrand to Local Vault
 
-### Phase 3: Vault Schema Hardening 📋 (Future - v0.4.0)
+### Phase 3: Credential Sync Engine ✅ (Complete - v0.3.2)
+- Username-keyed merge, newest password wins
+- Oldest creation time supplies the shared master key
+- Re-encryption under the shared key on adopt
+- Tombstone deletes propagate across devices
+- App and extension share one merge engine
+
+### Phase 4: Sync UI 📋 (Future)
+- QR pairing flow on both app and extension
+- Comparison code confirmation screen
+- Sync status and conflict reporting
+
+### Phase 5: Vault Schema Hardening 📋 (Future)
 - Single-blob vault encryption - site list becomes invisible at rest
 - Vault format version bump with migration
 - Fresh IV discipline audit across all encrypt paths
 
-### Phase 4: Platform Hardening 📋 (Future)
+### Phase 6: Platform Hardening 📋 (Future)
 - Android hardware keystore binding via Capacitor plugin
 - PRF fallback strategy per device capability
 - Web build parity decisions
 
+## Sync Model
+
+**Two independent rules govern sync, and they never interact.**
+
+Master key selection uses the oldest creation time. Every device starts with its own master key. When two devices pair, the vault with the oldest creation time supplies the shared master key, and the other device re-encrypts its credentials under it. The master key is internal and never shown, so this convergence is invisible during normal use.
+
+Credential merge uses the newest update time. Within a site the username is the identity. Matching usernames resolve to the newest password and the older one is discarded. Different usernames on the same site remain as separate logins. A credential on only one device is kept.
+
+Deletion uses tombstones. Deleting a credential writes a tombstone carrying a timestamp. On the next sync the tombstone propagates and the credential is removed from both devices. A credential re-added after a deletion carries a newer timestamp, so it survives.
+
+Convergence is guaranteed. If every device eventually syncs with the group, all devices arrive at the same master key and the same set of credentials. Sync order does not matter.
+
 ## Security Model
 
-**At rest, an attacker with your database faces:**
-- Password wraps - 600,000 PBKDF2 iterations per guess, no shortcut
-- Fingerprint wraps - key material bound to the device authenticator, absent from the database entirely
-- PIN - nothing. There is nothing stored to attack.
+**Encryption at rest:**
+- Passwords are wrapped with PBKDF2-SHA256 at 600,000 iterations per credential
+- Fingerprint wraps derive their key material from the device authenticator, so the wrapping secret lives in hardware rather than in the database
+- The PIN is never persisted, so there is nothing PIN-related stored on disk
 
-**Session PINs are ephemeral by design.** The PIN never touches disk, exists only for the current session, and vanishes when the app closes. There is nothing stored for an attacker to extract and nothing to brute-force offline. Three wrong guesses wipes the session entirely. A fresh session means proving you hold the real credential.
+**Session PINs are ephemeral by design.** The PIN never touches disk, exists only for the current session, and vanishes when the app closes. Three wrong attempts wipes the session and returns you to a real credential.
 
-**Known limitations, stated plainly:**
-- Domain names in the vault are plaintext keys - an attacker with the database learns which sites you use, not your credentials. Scheduled for v0.4.0.
-- During soft lock, master key material survives in memory in PIN-encrypted form - a memory-dump attacker with device access faces the 4-6 digit space. That attacker class already owns the device; the blob dies on process exit.
-- Master key round-trips through extractable bytes during multi-method enrollment - unavoidable in pure WebCrypto without hardware keystore binding.
-- PRF availability varies by platform. Devices without it get password unlock, not a pretend, theatre biometric. In other words, devices without biometric access will only be able to use the password feature.
+**Unlock methods stay local.** Fingerprint, PIN, and password are how you open the vault on one specific device. They are per device and never enter a sync. Your phone can use fingerprint while your browser uses a password. Only stored website credentials move between devices.
+
+**Design boundaries:**
+- Domain names are currently stored as plaintext object keys. Encrypting the vault as a single blob is planned so the site list is not readable at rest.
+- Physical access to an unlocked or in-session device is outside the threat model, as it is for any password manager. Security assumes the device itself is not compromised while in use.
+- The master key is handled in memory during multi-method enrollment, which is inherent to key management in the browser without a hardware keystore. Hardware keystore binding on Android is planned.
+- Fingerprint unlock requires an authenticator with WebAuthn PRF support. Devices without it use password unlock. There is no fake biometric path.
 
 ## Quick Start - Forks and Experimentation Highly Encouraged!
 
@@ -149,13 +192,13 @@ npx cap open android
 There are no stored password or PIN hashes. Authentication is the act of deriving a wrapping key from your credential and attempting the AES-GCM unwrap. The auth tag rejects wrong keys. This means the cheapest possible offline attack is the full KDF, by construction.
 
 **PRF-Bound Fingerprint:**
-The fingerprint wrapping key is derived via HKDF from the WebAuthn PRF extension output. That output requires the physical authenticator and user verification to produce. The database contains a wrapped key and a salt — the secret ingredient is in the hardware, not the data.
+The fingerprint wrapping key is derived via HKDF from the WebAuthn PRF extension output. That output requires the physical authenticator and user verification to produce. The database contains a wrapped key and a salt, the secret ingredient is in the hardware, not the data.
+
+**Credential Merge:**
+Two paired devices reconcile their vaults credential by credential. The username identifies a login within a site, so matching usernames resolve to the newest password while different usernames coexist. The merge runs on decrypted usernames inside the unlocked session, then re-encrypts under the shared key. The app and the browser extension run the exact same merge code.
 
 **Ephemeral Session PIN:**
 The PIN is a session artifact, not a stored credential. Setting it encrypts the in-memory master key under a PIN-derived key. Inactivity nulls the raw key and keeps only the blob. Resume decrypts it. Close the app and the whole construction evaporates. The guarantee comes from the absence of the artifact.
-
-**Zero-Comment Code:**
-Self-documenting variable names eliminate need for comments. Complexity that requires explanation is unnecessary and just an extra layer of work.
 
 **In-Memory Session State:**
 Session state lives in plain objects and Sets. No session persistence, tokens, or cookies.
@@ -194,7 +237,7 @@ Pre-1.0. The v0.3.0 key protection layer was reworked against identified weaknes
 
 ## License
 
-MIT License — See LICENSE file
+MIT License - See LICENSE file
 
 Copyright (c) 2025-2026 Rook
 
